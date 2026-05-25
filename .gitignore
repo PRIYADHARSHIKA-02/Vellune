@@ -1,9 +1,11 @@
 # Node modules
 node_modules/
+frontend/node_modules/
 backend/node_modules/
 
 # Build outputs
 dist/
+frontend/dist/
 backend/dist/
 out/
 
@@ -11,6 +13,9 @@ out/
 .env
 .env.local
 .env.*.local
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
 backend/.env
 backend/..env.placeholder
 
