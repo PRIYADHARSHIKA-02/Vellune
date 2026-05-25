@@ -1,0 +1,38 @@
+# Node modules
+node_modules/
+backend/node_modules/
+
+# Build outputs
+dist/
+backend/dist/
+out/
+
+# Environment files and secrets
+.env
+.env.local
+.env.*.local
+backend/.env
+backend/..env.placeholder
+
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# System files
+.DS_Store
+Thumbs.db
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.antigravity-ide/
+.antigravity/
+.gemini/
