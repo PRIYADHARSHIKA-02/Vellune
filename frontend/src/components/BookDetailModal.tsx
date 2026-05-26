@@ -1,132 +1,254 @@
-import React, { useState } from 'react';
-import { useStore, Book } from '../store';
-import { X, Plus, Clock, Bookmark, Info, Edit3, Trash2, Calendar, Star } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { useStore } from '../store';
+import { 
+  useBooks, 
+  useSessions, 
+  useNotes, 
+  useShelves, 
+  useUpdateBook, 
+  useDeleteBook, 
+  useAddNote, 
+  useAddSession 
+} from '../hooks/queries';
+import { X, Plus, Clock, Bookmark, Info, Edit3, Trash2, Calendar, Star, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
+import { useForm, Controller } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+import { Editor } from './Editor';
 
 interface BookDetailModalProps {
   bookId: string;
   onClose: () => void;
 }
 
+// Schemas
+const noteSchema = z.object({
+  content: z.string().min(1, 'Note content is required'),
+  type: z.enum(['note', 'quote', 'bookmark']),
+  pageNumber: z.union([z.number(), z.nan()]).transform(val => isNaN(val) ? null : val).nullable().optional(),
+  tags: z.string().optional(),
+  isFavorite: z.boolean().optional(),
+});
+
+const logPastSchema = z.object({
+  pastDate: z.string(),
+  pastDuration: z.number().min(1, 'Duration must be at least 1 minute'),
+  pastPagesRead: z.number().min(0, 'Pages read cannot be negative'),
+  pastLocation: z.string().min(1, 'Location is required'),
+  pastMood: z.string().min(1, 'Mood is required'),
+});
+
+type NoteFormValues = z.infer<typeof noteSchema>;
+type LogPastFormValues = z.infer<typeof logPastSchema>;
+
 export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClose }) => {
-  const { 
-    books, sessions, notes, shelves, updateBook, deleteBook, addNote, addSession 
-  } = useStore();
+  const { data: books = [] } = useBooks();
+  const { data: sessions = [] } = useSessions();
+  const { data: notes = [] } = useNotes();
+  const { data: shelves = [] } = useShelves();
+
+  const updateBookMutation = useUpdateBook();
+  const deleteBookMutation = useDeleteBook();
+  const addNoteMutation = useAddNote();
+  const addSessionMutation = useAddSession();
 
   const book = books.find(b => b.id === bookId);
-  if (!book) return null;
 
   const [activeTab, setActiveTab] = useState<'notes' | 'sessions' | 'edit'>('notes');
-  
-  // Note Form
-  const [noteContent, setNoteContent] = useState('');
-  const [noteType, setNoteType] = useState<'note' | 'quote' | 'bookmark'>('note');
-  const [notePage, setNotePage] = useState<number | ''>('');
-  const [noteTags, setNoteTags] = useState('');
-  const [isFavorite, setIsFavorite] = useState(false);
-
-  // Edit Book Form
-  const [title, setTitle] = useState(book.title);
-  const [author, setAuthor] = useState(book.author);
-  const [status, setStatus] = useState(book.status);
-  const [formatType, setFormatType] = useState(book.format);
-  const [currentPage, setCurrentPage] = useState(book.current_page);
-  const [pageCount, setPageCount] = useState(book.page_count);
-  const [shelfLocation, setShelfLocation] = useState(book.metadata.shelf_location || '');
-  const [dueDate, setDueDate] = useState(book.metadata.due_date ? book.metadata.due_date.substring(0,10) : '');
-  const [bookShelves, setBookShelves] = useState<string[]>(book.custom_shelf_ids);
-
-  // Log Past Session Form
   const [showLogPast, setShowLogPast] = useState(false);
-  const [pastDate, setPastDate] = useState(new Date().toISOString().substring(0,10));
-  const [pastDuration, setPastDuration] = useState<number>(30);
-  const [pastPagesRead, setPastPagesRead] = useState<number>(15);
-  const [pastLocation, setPastLocation] = useState('Home');
-  const [pastMood, setPastMood] = useState('focused');
 
-  const bookSessions = sessions.filter(s => s.book_id === book.id);
-  const bookNotes = notes.filter(n => n.book_id === book.id);
+  // Edit Book Form setup
+  const editBookBaseSchema = z.object({
+    title: z.string().min(1, 'Title is required'),
+    author: z.string().min(1, 'Author is required'),
+    format: z.enum(['physical', 'ebook', 'audiobook', 'library']),
+    status: z.enum(['to-read', 'reading', 'finished', 'on-hold', 'dnf']),
+    currentPage: z.number().min(0, 'Current page cannot be negative'),
+    pageCount: z.number().min(1, 'Page count must be at least 1'),
+    platform: z.string().optional(),
+    shelfLocation: z.string().optional(),
+    dueDate: z.string().optional(),
+    customShelfIds: z.array(z.string()),
+  });
 
-  const handleAddNote = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!noteContent.trim()) return;
+  const editBookSchema = editBookBaseSchema.refine(data => data.currentPage <= data.pageCount, {
+    message: "Current page cannot exceed total pages",
+    path: ["currentPage"]
+  });
 
-    addNote({
-      book_id: book.id,
-      type: noteType,
-      content: noteContent,
-      page_number: notePage !== '' ? notePage : undefined,
-      tags: noteTags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean),
-      is_favorite: isFavorite
-    });
+  type EditBookFormValues = z.infer<typeof editBookBaseSchema>;
 
-    setNoteContent('');
-    setNotePage('');
-    setNoteTags('');
-    setIsFavorite(false);
+  const editBookForm = useForm<EditBookFormValues>({
+    resolver: zodResolver(editBookSchema),
+    defaultValues: {
+      title: '',
+      author: '',
+      format: 'physical',
+      status: 'to-read',
+      currentPage: 0,
+      pageCount: 300,
+      platform: '',
+      shelfLocation: '',
+      dueDate: '',
+      customShelfIds: [],
+    }
+  });
+
+  // Populate edit form when book loads
+  useEffect(() => {
+    if (book) {
+      editBookForm.reset({
+        title: book.title,
+        author: book.author,
+        format: book.format,
+        status: book.status,
+        currentPage: book.currentPage,
+        pageCount: book.pageCount,
+        platform: book.platform || '',
+        shelfLocation: book.metadata?.shelfLocation || '',
+        dueDate: book.metadata?.dueDate ? book.metadata.dueDate.substring(0, 10) : '',
+        customShelfIds: book.customShelfIds || [],
+      });
+    }
+  }, [book, editBookForm]);
+
+  // Note form
+  const noteForm = useForm<NoteFormValues>({
+    resolver: zodResolver(noteSchema),
+    defaultValues: {
+      content: '',
+      type: 'note',
+      pageNumber: null,
+      tags: '',
+      isFavorite: false,
+    }
+  });
+
+  // Log past form
+  const logPastForm = useForm<LogPastFormValues>({
+    resolver: zodResolver(logPastSchema),
+    defaultValues: {
+      pastDate: new Date().toISOString().substring(0, 10),
+      pastDuration: 30,
+      pastPagesRead: 15,
+      pastLocation: 'Home',
+      pastMood: 'focused',
+    }
+  });
+
+  if (!book) return null;
+
+  const bookSessions = sessions.filter(s => s.bookId === book.id);
+  const bookNotes = notes.filter(n => n.bookId === book.id);
+
+  const handleAddNoteSubmit = async (values: NoteFormValues) => {
+    try {
+      await addNoteMutation.mutateAsync({
+        bookId: book.id,
+        type: values.type,
+        content: values.content,
+        pageNumber: values.pageNumber || null,
+        tags: values.tags ? values.tags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean) : [],
+        isFavorite: !!values.isFavorite
+      });
+      noteForm.reset({
+        content: '',
+        type: 'note',
+        pageNumber: null,
+        tags: '',
+        isFavorite: false,
+      });
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Failed to capture note.');
+    }
   };
 
-  const handleUpdateBook = (e: React.FormEvent) => {
-    e.preventDefault();
-    updateBook(book.id, {
-      title,
-      author,
-      status,
-      format: formatType,
-      current_page: currentPage,
-      page_count: pageCount,
-      custom_shelf_ids: bookShelves,
-      metadata: {
-        ...book.metadata,
-        shelf_location: formatType === 'physical' ? shelfLocation : undefined,
-        due_date: formatType === 'library' && dueDate ? new Date(dueDate).toISOString() : undefined
-      }
-    });
-    alert('Book updated successfully!');
+  const handleUpdateBookSubmit = async (values: EditBookFormValues) => {
+    try {
+      await updateBookMutation.mutateAsync({
+        id: book.id,
+        updates: {
+          title: values.title,
+          author: values.author,
+          status: values.status,
+          format: values.format,
+          currentPage: values.currentPage,
+          pageCount: values.pageCount,
+          customShelfIds: values.customShelfIds,
+          platform: values.platform || null,
+          metadata: {
+            ...book.metadata,
+            shelfLocation: values.format === 'physical' ? values.shelfLocation : undefined,
+            dueDate: values.format === 'library' && values.dueDate ? new Date(values.dueDate).toISOString() : undefined
+          }
+        }
+      });
+      alert('Book updated successfully!');
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Failed to update book.');
+    }
   };
 
-  const handleLogPastSession = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    const start = new Date(pastDate);
-    const end = new Date(start.getTime() + pastDuration * 60000);
+  const handleLogPastSessionSubmit = async (values: LogPastFormValues) => {
+    const start = new Date(values.pastDate);
+    const end = new Date(start.getTime() + values.pastDuration * 60000);
 
-    const startPage = book.current_page;
-    const endPage = book.current_page + pastPagesRead;
+    const startPage = book.currentPage;
+    const endPage = book.currentPage + values.pastPagesRead;
 
-    addSession({
-      book_id: book.id,
-      start_time: start.toISOString(),
-      end_time: end.toISOString(),
-      duration_minutes: pastDuration,
-      pages_start: startPage,
-      pages_end: endPage,
-      pages_read: pastPagesRead,
-      format_used: book.format,
-      location: pastLocation,
-      mood_before: 'neutral',
-      mood_after: pastMood
-    });
+    try {
+      await addSessionMutation.mutateAsync({
+        bookId: book.id,
+        startTime: start.toISOString(),
+        endTime: end.toISOString(),
+        durationMinutes: values.pastDuration,
+        pagesStart: startPage,
+        pagesEnd: endPage,
+        pagesRead: values.pastPagesRead,
+        formatUsed: book.format,
+        location: values.pastLocation,
+        moodBefore: 'neutral',
+        moodAfter: values.pastMood,
+        notes: null
+      });
 
-    setShowLogPast(false);
-    setPastPagesRead(15);
-    setPastDuration(30);
+      setShowLogPast(false);
+      logPastForm.reset({
+        pastDate: new Date().toISOString().substring(0, 10),
+        pastDuration: 30,
+        pastPagesRead: 15,
+        pastLocation: 'Home',
+        pastMood: 'focused',
+      });
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Failed to record past session.');
+    }
   };
 
   const toggleShelfSelection = (shelfId: string) => {
-    if (bookShelves.includes(shelfId)) {
-      setBookShelves(bookShelves.filter(id => id !== shelfId));
+    const current = editBookForm.getValues('customShelfIds') || [];
+    if (current.includes(shelfId)) {
+      editBookForm.setValue('customShelfIds', current.filter(id => id !== shelfId));
     } else {
-      setBookShelves([...bookShelves, shelfId]);
+      editBookForm.setValue('customShelfIds', [...current, shelfId]);
     }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (confirm(`Are you sure you want to permanently delete "${book.title}"?`)) {
-      deleteBook(book.id);
-      onClose();
+      try {
+        await deleteBookMutation.mutateAsync(book.id);
+        onClose();
+      } catch (err: any) {
+        alert(err.response?.data?.error || 'Failed to delete book.');
+      }
     }
   };
+
+  const editFormatType = editBookForm.watch('format');
+  const editBookShelves = editBookForm.watch('customShelfIds') || [];
+  const noteIsFavorite = noteForm.watch('isFavorite');
 
   return (
     <div className="modal-overlay" style={{ zIndex: 110 }}>
@@ -138,7 +260,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
         {/* Header Summary */}
         <div style={{ display: 'flex', gap: '1.5rem', borderBottom: '1px solid var(--border-glass)', paddingBottom: '1.25rem' }}>
           <img 
-            src={book.cover_url} 
+            src={book.coverUrl || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=100'} 
             alt={book.title} 
             style={{ width: '80px', height: '120px', borderRadius: '6px', objectFit: 'cover' }} 
             onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=100' }}
@@ -150,7 +272,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
               <span className={`badge-format ${book.format}`}>{book.format.toUpperCase()}</span>
               <span style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}>
-                Progress: {book.progress_percentage}% ({book.current_page}/{book.page_count} pages)
+                Progress: {book.progressPercentage}% ({book.currentPage}/{book.pageCount} pages)
               </span>
             </div>
           </div>
@@ -161,21 +283,21 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
           <button 
             className={`btn-text ${activeTab === 'notes' ? 'active' : ''}`}
             onClick={() => setActiveTab('notes')}
-            style={{ borderBottom: activeTab === 'notes' ? '2px solid var(--accent-primary)' : 'none', borderRadius: 0, padding: '0.75rem 0' }}
+            style={{ borderBottom: activeTab === 'notes' ? '2px solid var(--accent-primary)' : 'none', borderRadius: 0, padding: '0.75rem 0', fontWeight: 600 }}
           >
             Notes & Quotes ({bookNotes.length})
           </button>
           <button 
             className={`btn-text ${activeTab === 'sessions' ? 'active' : ''}`}
             onClick={() => setActiveTab('sessions')}
-            style={{ borderBottom: activeTab === 'sessions' ? '2px solid var(--accent-primary)' : 'none', borderRadius: 0, padding: '0.75rem 0' }}
+            style={{ borderBottom: activeTab === 'sessions' ? '2px solid var(--accent-primary)' : 'none', borderRadius: 0, padding: '0.75rem 0', fontWeight: 600 }}
           >
             History & Sessions ({bookSessions.length})
           </button>
           <button 
             className={`btn-text ${activeTab === 'edit' ? 'active' : ''}`}
             onClick={() => setActiveTab('edit')}
-            style={{ borderBottom: activeTab === 'edit' ? '2px solid var(--accent-primary)' : 'none', borderRadius: 0, padding: '0.75rem 0' }}
+            style={{ borderBottom: activeTab === 'edit' ? '2px solid var(--accent-primary)' : 'none', borderRadius: 0, padding: '0.75rem 0', fontWeight: 600 }}
           >
             Manage Book
           </button>
@@ -188,22 +310,27 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
           {activeTab === 'notes' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               {/* Add Note Form */}
-              <form onSubmit={handleAddNote} className="glass" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', background: 'rgba(255,255,255,0.02)' }}>
-                <h4 style={{ fontSize: '0.9rem', fontWeight: 700 }}>Capture a new moment</h4>
-                <textarea 
-                  className="form-textarea" 
-                  rows={2} 
-                  placeholder={noteType === 'quote' ? "Paste or write the quote..." : "What are you thinking?"}
-                  value={noteContent}
-                  onChange={(e) => setNoteContent(e.target.value)}
-                  required
+              <form onSubmit={noteForm.handleSubmit(handleAddNoteSubmit)} className="glass" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', background: 'rgba(255,255,255,0.02)' }}>
+                <h4 style={{ fontSize: '0.9rem', fontWeight: 700 }}>Capture a new moment (Rich Text Note)</h4>
+                
+                <Controller
+                  name="content"
+                  control={noteForm.control}
+                  render={({ field }) => (
+                    <Editor
+                      value={field.value}
+                      onChange={field.onChange}
+                      placeholder={noteForm.watch('type') === 'quote' ? "Paste or write the quote..." : "What are you thinking?"}
+                    />
+                  )}
                 />
+                {noteForm.formState.errors.content && <span style={{ color: 'var(--color-dnf)', fontSize: '0.75rem' }}>{noteForm.formState.errors.content.message}</span>}
+
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
                   <select 
                     className="form-select" 
                     style={{ width: '130px', padding: '0.45rem' }}
-                    value={noteType}
-                    onChange={(e) => setNoteType(e.target.value as any)}
+                    {...noteForm.register('type')}
                   >
                     <option value="note">Text Note</option>
                     <option value="quote">Quote</option>
@@ -215,8 +342,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
                     className="form-input" 
                     style={{ width: '90px', padding: '0.45rem' }} 
                     placeholder="Page"
-                    value={notePage}
-                    onChange={(e) => setNotePage(parseInt(e.target.value) || '')}
+                    {...noteForm.register('pageNumber', { valueAsNumber: true })}
                   />
 
                   <input 
@@ -224,21 +350,20 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
                     className="form-input" 
                     style={{ flexGrow: 1, minWidth: '150px', padding: '0.45rem' }} 
                     placeholder="Tags (comma separated)"
-                    value={noteTags}
-                    onChange={(e) => setNoteTags(e.target.value)}
+                    {...noteForm.register('tags')}
                   />
 
                   <button 
                     type="button"
-                    onClick={() => setIsFavorite(!isFavorite)}
-                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: isFavorite ? 'var(--color-on-hold)' : 'var(--text-muted)' }}
+                    onClick={() => noteForm.setValue('isFavorite', !noteIsFavorite)}
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: noteIsFavorite ? 'var(--color-on-hold)' : 'var(--text-muted)' }}
                     title="Toggle Favorite"
                   >
-                    <Star size={20} fill={isFavorite ? 'currentColor' : 'none'} />
+                    <Star size={20} fill={noteIsFavorite ? 'currentColor' : 'none'} />
                   </button>
 
-                  <button type="submit" className="btn btn-primary" style={{ padding: '0.45rem 1rem' }}>
-                    <Plus size={14} /> Add
+                  <button type="submit" className="btn btn-primary" style={{ padding: '0.45rem 1rem', color: '#091A1E', fontWeight: 700 }} disabled={addNoteMutation.isPending}>
+                    {addNoteMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <Plus size={14} />} Add
                   </button>
                 </div>
               </form>
@@ -251,20 +376,22 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
                   bookNotes.map((note) => (
                     <div key={note.id} className="glass" style={{ padding: '1rem', borderLeft: note.type === 'quote' ? '3px solid var(--accent-primary)' : '1px solid var(--border-glass)' }}>
                       <div className="flex-between" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
-                        <span style={{ textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.02em', color: 'var(--accent-primary)' }}>
-                          {note.type} {note.page_number && `• Page ${note.page_number}`}
+                        <span style={{ textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.02em', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                          {note.isFavorite && <Star size={10} fill="var(--color-on-hold)" style={{ color: 'var(--color-on-hold)' }} />}
+                          {note.type} {note.pageNumber && `• Page ${note.pageNumber}`}
                         </span>
-                        <span>{format(new Date(note.created_at), 'MMM dd, yyyy')}</span>
+                        <span>{format(new Date(note.createdAt), 'MMM dd, yyyy')}</span>
                       </div>
                       
-                      <p style={{ 
-                        fontSize: '0.9rem', 
-                        fontStyle: note.type === 'quote' ? 'italic' : 'normal',
-                        lineHeight: 1.5,
-                        color: note.type === 'quote' ? 'var(--text-primary)' : 'var(--text-secondary)'
-                      }}>
-                        {note.type === 'quote' ? `"${note.content}"` : note.content}
-                      </p>
+                      <div 
+                        style={{ 
+                          fontSize: '0.9rem', 
+                          fontStyle: note.type === 'quote' ? 'italic' : 'normal',
+                          lineHeight: 1.5,
+                          color: note.type === 'quote' ? 'var(--text-primary)' : 'var(--text-secondary)'
+                        }}
+                        dangerouslySetInnerHTML={{ __html: note.content }}
+                      />
 
                       {note.tags.length > 0 && (
                         <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.5rem' }}>
@@ -298,30 +425,32 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
 
               {/* Log Past Form */}
               {showLogPast && (
-                <form onSubmit={handleLogPastSession} className="glass" style={{ padding: '1rem', background: 'rgba(255,255,255,0.02)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <form onSubmit={logPastForm.handleSubmit(handleLogPastSessionSubmit)} className="glass" style={{ padding: '1rem', background: 'rgba(255,255,255,0.02)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   <h5 style={{ fontWeight: 700, fontSize: '0.85rem' }}>Log a past session</h5>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem' }}>
                     <div>
                       <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Date</label>
-                      <input type="date" className="form-input" style={{ padding: '0.4rem' }} value={pastDate} onChange={e => setPastDate(e.target.value)} required />
+                      <input type="date" className="form-input" style={{ padding: '0.4rem' }} {...logPastForm.register('pastDate')} />
                     </div>
                     <div>
                       <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Duration (min)</label>
-                      <input type="number" className="form-input" style={{ padding: '0.4rem' }} value={pastDuration} onChange={e => setPastDuration(parseInt(e.target.value) || 0)} required />
+                      <input type="number" className="form-input" style={{ padding: '0.4rem' }} {...logPastForm.register('pastDuration', { valueAsNumber: true })} />
+                      {logPastForm.formState.errors.pastDuration && <span style={{ color: 'var(--color-dnf)', fontSize: '0.7rem' }}>{logPastForm.formState.errors.pastDuration.message}</span>}
                     </div>
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Pages / Min Read</label>
-                      <input type="number" className="form-input" style={{ padding: '0.4rem' }} value={pastPagesRead} onChange={e => setPastPagesRead(parseInt(e.target.value) || 0)} required />
+                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Pages Read</label>
+                      <input type="number" className="form-input" style={{ padding: '0.4rem' }} {...logPastForm.register('pastPagesRead', { valueAsNumber: true })} />
+                      {logPastForm.formState.errors.pastPagesRead && <span style={{ color: 'var(--color-dnf)', fontSize: '0.7rem' }}>{logPastForm.formState.errors.pastPagesRead.message}</span>}
                     </div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem' }}>
                     <div>
                       <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Location</label>
-                      <input type="text" className="form-input" style={{ padding: '0.4rem' }} value={pastLocation} onChange={e => setPastLocation(e.target.value)} />
+                      <input type="text" className="form-input" style={{ padding: '0.4rem' }} {...logPastForm.register('pastLocation')} />
                     </div>
                     <div>
                       <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Mood After</label>
-                      <select className="form-select" style={{ padding: '0.4rem' }} value={pastMood} onChange={e => setPastMood(e.target.value)}>
+                      <select className="form-select" style={{ padding: '0.4rem' }} {...logPastForm.register('pastMood')}>
                         <option value="focused">Focused</option>
                         <option value="inspired">Inspired</option>
                         <option value="relaxed">Relaxed</option>
@@ -331,7 +460,9 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
                     </div>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.25rem' }}>
-                    <button type="submit" className="btn btn-primary" style={{ padding: '0.45rem 1rem', fontSize: '0.8rem' }}>Save Log</button>
+                    <button type="submit" className="btn btn-primary" style={{ padding: '0.45rem 1rem', fontSize: '0.8rem', color: '#091A1E', fontWeight: 700 }} disabled={addSessionMutation.isPending}>
+                      {addSessionMutation.isPending ? 'Saving...' : 'Save Log'}
+                    </button>
                   </div>
                 </form>
               )}
@@ -345,21 +476,21 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
                     <div key={session.id} className="glass" style={{ padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
                         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                          <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>Read {session.pages_read} pages / min</span>
+                          <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>Read {session.pagesRead} pages / min</span>
                           <span style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', color: 'var(--text-secondary)' }}>
-                            p. {session.pages_start} - {session.pages_end}
+                            p. {session.pagesStart} - {session.pagesEnd}
                           </span>
                         </div>
                         <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'flex', gap: '0.5rem' }}>
-                          <span>⏱️ {session.duration_minutes} min</span>
+                          <span>⏱️ {session.durationMinutes} min</span>
                           <span>📍 {session.location}</span>
-                          <span>😊 {session.mood_after}</span>
+                          <span>😊 {session.moodAfter}</span>
                         </p>
                       </div>
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textAlign: 'right' }}>
-                        <div>{format(new Date(session.start_time), 'MMM dd, yyyy')}</div>
+                        <div>{format(new Date(session.startTime), 'MMM dd, yyyy')}</div>
                         <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
-                          {format(new Date(session.start_time), 'h:mm a')}
+                          {format(new Date(session.startTime), 'h:mm a')}
                         </div>
                       </div>
                     </div>
@@ -371,22 +502,24 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
 
           {/* Manage Tab */}
           {activeTab === 'edit' && (
-            <form onSubmit={handleUpdateBook} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <form onSubmit={editBookForm.handleSubmit(handleUpdateBookSubmit)} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Title</label>
-                  <input type="text" className="form-input" value={title} onChange={e => setTitle(e.target.value)} required />
+                  <input type="text" className="form-input" {...editBookForm.register('title')} />
+                  {editBookForm.formState.errors.title && <span style={{ color: 'var(--color-dnf)', fontSize: '0.75rem' }}>{editBookForm.formState.errors.title.message}</span>}
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.8', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Author</label>
-                  <input type="text" className="form-input" value={author} onChange={e => setAuthor(e.target.value)} required />
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Author</label>
+                  <input type="text" className="form-input" {...editBookForm.register('author')} />
+                  {editBookForm.formState.errors.author && <span style={{ color: 'var(--color-dnf)', fontSize: '0.75rem' }}>{editBookForm.formState.errors.author.message}</span>}
                 </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Format</label>
-                  <select className="form-select" value={formatType} onChange={e => setFormatType(e.target.value as any)}>
+                  <select className="form-select" {...editBookForm.register('format')}>
                     <option value="physical">Physical Book</option>
                     <option value="ebook">Ebook</option>
                     <option value="audiobook">Audiobook</option>
@@ -395,7 +528,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Reading Status</label>
-                  <select className="form-select" value={status} onChange={e => setStatus(e.target.value as any)}>
+                  <select className="form-select" {...editBookForm.register('status')}>
                     <option value="to-read">To Read (TBR)</option>
                     <option value="reading">Currently Reading</option>
                     <option value="finished">Finished</option>
@@ -408,25 +541,27 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Current Page / Minutes</label>
-                  <input type="number" className="form-input" value={currentPage} onChange={e => setCurrentPage(parseInt(e.target.value) || 0)} min={0} max={pageCount} />
+                  <input type="number" className="form-input" {...editBookForm.register('currentPage', { valueAsNumber: true })} />
+                  {editBookForm.formState.errors.currentPage && <span style={{ color: 'var(--color-dnf)', fontSize: '0.75rem' }}>{editBookForm.formState.errors.currentPage.message}</span>}
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Total Pages / Minutes</label>
-                  <input type="number" className="form-input" value={pageCount} onChange={e => setPageCount(parseInt(e.target.value) || 1)} min={1} />
+                  <input type="number" className="form-input" {...editBookForm.register('pageCount', { valueAsNumber: true })} />
+                  {editBookForm.formState.errors.pageCount && <span style={{ color: 'var(--color-dnf)', fontSize: '0.75rem' }}>{editBookForm.formState.errors.pageCount.message}</span>}
                 </div>
               </div>
 
-              {formatType === 'physical' && (
+              {editFormatType === 'physical' && (
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Shelf Location (e.g. Living Room Shelf A)</label>
-                  <input type="text" className="form-input" placeholder="Living Room Shelf A" value={shelfLocation} onChange={e => setShelfLocation(e.target.value)} />
+                  <input type="text" className="form-input" placeholder="Living Room Shelf A" {...editBookForm.register('shelfLocation')} />
                 </div>
               )}
 
-              {formatType === 'library' && (
+              {editFormatType === 'library' && (
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Due Date</label>
-                  <input type="date" className="form-input" value={dueDate} onChange={e => setDueDate(e.target.value)} />
+                  <input type="date" className="form-input" {...editBookForm.register('dueDate')} />
                 </div>
               )}
 
@@ -435,7 +570,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
                 <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Collections / Shelves</label>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   {shelves.map(shelf => {
-                    const isSelected = bookShelves.includes(shelf.id);
+                    const isSelected = editBookShelves.includes(shelf.id);
                     return (
                       <button
                         key={shelf.id}
@@ -466,10 +601,13 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
                   className="btn btn-secondary" 
                   style={{ color: 'var(--color-dnf)', borderColor: 'rgba(239, 68, 68, 0.2)', display: 'flex', gap: '0.25rem', alignItems: 'center' }}
                   onClick={handleDelete}
+                  disabled={deleteBookMutation.isPending}
                 >
-                  <Trash2 size={14} /> Delete Book
+                  {deleteBookMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Delete Book
                 </button>
-                <button type="submit" className="btn btn-primary">Save Changes</button>
+                <button type="submit" className="btn btn-primary" style={{ color: '#091A1E', fontWeight: 700 }} disabled={updateBookMutation.isPending}>
+                  {updateBookMutation.isPending ? 'Saving...' : 'Save Changes'}
+                </button>
               </div>
             </form>
           )}

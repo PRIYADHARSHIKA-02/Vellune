@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store';
-import { useBooks } from '../hooks/queries';
 import { Play, Square, Timer, MapPin, Smile } from 'lucide-react';
 
 interface ActiveSessionTrackerProps {
@@ -8,8 +7,7 @@ interface ActiveSessionTrackerProps {
 }
 
 export const ActiveSessionTracker: React.FC<ActiveSessionTrackerProps> = ({ onLogOpen }) => {
-  const { activeSession, cancelReadingSession } = useStore();
-  const { data: books = [] } = useBooks();
+  const { activeSession, books, cancelReadingSession } = useStore();
   const [secondsElapsed, setSecondsElapsed] = useState(0);
 
   useEffect(() => {
@@ -51,7 +49,7 @@ export const ActiveSessionTracker: React.FC<ActiveSessionTrackerProps> = ({ onLo
     <div className="active-tracker-bar animate-pulse-glow">
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', minWidth: 0 }}>
         <img 
-          src={book.coverUrl || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=100'} 
+          src={book.cover_url} 
           alt={book.title} 
           style={{ width: '32px', height: '48px', borderRadius: '4px', objectFit: 'cover' }} 
         />

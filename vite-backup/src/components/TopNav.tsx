@@ -1,15 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useStore } from '../store';
+import { useStore, ScreenType } from '../store';
 import { 
   BookOpen, Library, Clock, Sparkles, 
   Bookmark, Users, BarChart3, Sun, Moon,
   LogOut, User, Settings, Save, X, Edit2
 } from 'lucide-react';
-import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
 
 interface NavItem {
-  id: string;
+  id: ScreenType;
   label: string;
   icon: React.ComponentType<any>;
 }
@@ -33,12 +31,10 @@ const PRESETS_AVATARS = [
 ];
 
 export const TopNav: React.FC = () => {
-  const { theme, toggleTheme, user, logout } = useStore();
+  const { currentScreen, setScreen, theme, toggleTheme, user, logout } = useStore();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const pathname = usePathname();
-  const router = useRouter();
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -55,27 +51,26 @@ export const TopNav: React.FC = () => {
     <>
       <header className="top-nav">
         {/* Brand Logo */}
-        <Link href="/" className="logo-container" style={{ textDecoration: 'none' }}>
+        <div className="logo-container" onClick={() => setScreen('home')}>
           <span className="logo-icon">📚</span>
           <span className="logo-text">Vellune</span>
-        </Link>
+        </div>
 
         {/* Center Links (Desktop only) */}
         <nav>
           <ul className="nav-links">
             {NAVIGATION_ITEMS.map((item) => {
               const Icon = item.icon;
-              const href = item.id === 'home' ? '/' : `/${item.id}`;
-              const isActive = pathname === href;
+              const isActive = currentScreen === item.id;
               return (
                 <li key={item.id}>
-                  <Link
-                    href={href}
+                  <a
                     className={`nav-item ${isActive ? 'active' : ''}`}
+                    onClick={() => setScreen(item.id)}
                   >
                     <Icon size={16} />
                     <span>{item.label}</span>
-                  </Link>
+                  </a>
                 </li>
               );
             })}
@@ -102,12 +97,12 @@ export const TopNav: React.FC = () => {
             >
               <div className="profile-avatar-container">
                 <img 
-                  src={user.avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150'} 
-                  alt={user.fullName || user.username || 'User'} 
+                  src={user.avatarUrl} 
+                  alt={user.name} 
                   className="profile-avatar"
                 />
               </div>
-              <span className="profile-name" style={{ display: 'inline-block' }}>{user.fullName || user.username}</span>
+              <span className="profile-name" style={{ display: 'inline-block' }}>{user.name}</span>
             </div>
           )}
 
@@ -115,7 +110,7 @@ export const TopNav: React.FC = () => {
           {isDropdownOpen && user && (
             <div className="profile-dropdown">
               <div className="profile-dropdown-header">
-                <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)' }}>{user.fullName || user.username}</div>
+                <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)' }}>{user.name}</div>
                 <div className="profile-dropdown-email">{user.email}</div>
               </div>
               
@@ -157,23 +152,22 @@ export const TopNav: React.FC = () => {
 };
 
 export const MobileNav: React.FC = () => {
-  const pathname = usePathname();
+  const { currentScreen, setScreen } = useStore();
 
   return (
     <nav className="mobile-nav">
       {NAVIGATION_ITEMS.map((item) => {
         const Icon = item.icon;
-        const href = item.id === 'home' ? '/' : `/${item.id}`;
-        const isActive = pathname === href;
+        const isActive = currentScreen === item.id;
         return (
-          <Link
+          <a
             key={item.id}
-            href={href}
             className={`mobile-nav-item ${isActive ? 'active' : ''}`}
+            onClick={() => setScreen(item.id)}
           >
             <Icon />
             <span>{item.label}</span>
-          </Link>
+          </a>
         );
       })}
     </nav>
@@ -189,24 +183,24 @@ interface ProfileModalProps {
 const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) => {
   const { user, updateProfile } = useStore();
   
-  const [name, setName] = useState(user?.fullName || user?.username || '');
-  const [email, setEmail] = useState(user?.email || '');
-  const [bio, setBio] = useState(user?.bio || '');
-  const [favoriteGenre, setFavoriteGenre] = useState(user?.favoriteGenre || '');
-  const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || '');
+  if (!user) return null;
+
+  const [name, setName] = useState(user.name);
+  const [email, setEmail] = useState(user.email);
+  const [bio, setBio] = useState(user.bio);
+  const [favoriteGenre, setFavoriteGenre] = useState(user.favoriteGenre);
+  const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl);
   const [customAvatarUrl, setCustomAvatarUrl] = useState('');
   const [showCustomAvatarInput, setShowCustomAvatarInput] = useState(false);
-
-  if (!user) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     updateProfile({
-      fullName: name.trim(),
+      name: name.trim(),
       email: email.trim(),
       bio: bio.trim(),
       favoriteGenre: favoriteGenre.trim(),
-      avatarUrl: showCustomAvatarInput && customAvatarUrl.trim() ? customAvatarUrl.trim() : (avatarUrl || undefined)
+      avatarUrl: showCustomAvatarInput && customAvatarUrl.trim() ? customAvatarUrl.trim() : avatarUrl
     });
     onClose();
   };

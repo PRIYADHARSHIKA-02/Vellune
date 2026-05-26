@@ -1,31 +1,28 @@
 import React from 'react';
-import { useStore } from '../store';
+import { useStore, ScreenType } from '../store';
 import { 
   BookOpen, Library, Clock, Sparkles, 
   Bookmark, Users, BarChart3, Sun, Moon 
 } from 'lucide-react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 
 interface NavItem {
-  path: string;
+  id: ScreenType;
   label: string;
   icon: React.ComponentType<any>;
 }
 
 const NAVIGATION_ITEMS: NavItem[] = [
-  { path: '/', label: 'Home', icon: BookOpen },
-  { path: '/shelf', label: 'Shelf', icon: Library },
-  { path: '/track', label: 'Track', icon: Clock },
-  { path: '/discover', label: 'Discover', icon: Sparkles },
-  { path: '/remember', label: 'Remember', icon: Bookmark },
-  { path: '/groups', label: 'Circles', icon: Users },
-  { path: '/stats', label: 'Stats', icon: BarChart3 }
+  { id: 'home', label: 'Home', icon: BookOpen },
+  { id: 'shelf', label: 'Shelf', icon: Library },
+  { id: 'track', label: 'Track', icon: Clock },
+  { id: 'discover', label: 'Discover', icon: Sparkles },
+  { id: 'remember', label: 'Remember', icon: Bookmark },
+  { id: 'groups', label: 'Circles', icon: Users },
+  { id: 'stats', label: 'Stats', icon: BarChart3 }
 ];
 
 export const Sidebar: React.FC = () => {
-  const { theme, toggleTheme } = useStore();
-  const pathname = usePathname();
+  const { currentScreen, setScreen, theme, toggleTheme } = useStore();
 
   return (
     <aside className="sidebar">
@@ -38,16 +35,16 @@ export const Sidebar: React.FC = () => {
         <ul className="nav-links">
           {NAVIGATION_ITEMS.map((item) => {
             const Icon = item.icon;
-            const isActive = pathname === item.path;
+            const isActive = currentScreen === item.id;
             return (
-              <li key={item.path}>
-                <Link
-                  href={item.path}
+              <li key={item.id}>
+                <a
                   className={`nav-item ${isActive ? 'active' : ''}`}
+                  onClick={() => setScreen(item.id)}
                 >
                   <Icon size={18} />
                   <span>{item.label}</span>
-                </Link>
+                </a>
               </li>
             );
           })}
@@ -69,23 +66,22 @@ export const Sidebar: React.FC = () => {
 };
 
 export const MobileNav: React.FC = () => {
-  const { theme, toggleTheme } = useStore();
-  const pathname = usePathname();
+  const { currentScreen, setScreen, theme, toggleTheme } = useStore();
 
   return (
     <nav className="mobile-nav">
       {NAVIGATION_ITEMS.map((item) => {
         const Icon = item.icon;
-        const isActive = pathname === item.path;
+        const isActive = currentScreen === item.id;
         return (
-          <Link
-            key={item.path}
-            href={item.path}
+          <a
+            key={item.id}
             className={`mobile-nav-item ${isActive ? 'active' : ''}`}
+            onClick={() => setScreen(item.id)}
           >
             <Icon />
             <span>{item.label}</span>
-          </Link>
+          </a>
         );
       })}
       

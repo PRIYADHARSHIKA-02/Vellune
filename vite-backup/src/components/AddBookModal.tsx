@@ -1,32 +1,6 @@
 import React, { useState } from 'react';
-import { useStore } from '../store';
-import { useShelves, useAddBook } from '../hooks/queries';
+import { useStore, Book } from '../store';
 import { X, Sparkles, BookOpen } from 'lucide-react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import * as z from 'zod';
-
-const bookBaseSchema = z.object({
-  title: z.string().min(1, 'Title is required'),
-  author: z.string().min(1, 'Author is required'),
-  isbn: z.string().optional(),
-  coverUrl: z.string().optional(),
-  format: z.enum(['physical', 'ebook', 'audiobook', 'library']),
-  status: z.enum(['to-read', 'reading', 'finished', 'on-hold', 'dnf']),
-  currentPage: z.number().min(0, 'Current page cannot be negative'),
-  pageCount: z.number().min(1, 'Page count must be at least 1'),
-  platform: z.string().optional(),
-  shelfLocation: z.string().optional(),
-  dueDate: z.string().optional(),
-  customShelfIds: z.array(z.string()),
-});
-
-const bookSchema = bookBaseSchema.refine(data => data.currentPage <= data.pageCount, {
-  message: "Current page cannot exceed total pages",
-  path: ["currentPage"]
-});
-
-type BookFormValues = z.infer<typeof bookBaseSchema>;
 
 interface AddBookModalProps {
   isOpen: boolean;
@@ -34,34 +8,26 @@ interface AddBookModalProps {
 }
 
 export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) => {
-  const { data: shelves = [] } = useShelves();
-  const addBookMutation = useAddBook();
+  const { shelves, addBook } = useStore();
 
   // Search Results from Open Library API
   const [apiSearchQuery, setApiSearchQuery] = useState('');
   const [apiResults, setApiResults] = useState<any[]>([]);
   const [isSearchingApi, setIsSearchingApi] = useState(false);
 
-  const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<BookFormValues>({
-    resolver: zodResolver(bookSchema),
-    defaultValues: {
-      title: '',
-      author: '',
-      isbn: '',
-      coverUrl: '',
-      format: 'physical',
-      status: 'to-read',
-      currentPage: 0,
-      pageCount: 300,
-      platform: '',
-      shelfLocation: '',
-      dueDate: '',
-      customShelfIds: [],
-    }
-  });
-
-  const formatType = watch('format');
-  const selectedShelves = watch('customShelfIds') || [];
+  // New Book Form
+  const [title, setTitle] = useState('');
+  const [author, setAuthor] = useState('');
+  const [isbn, setIsbn] = useState('');
+  const [coverUrl, setCoverUrl] = useState('');
+  const [formatType, setFormatType] = useState<Book['format']>('physical');
+  const [status, setStatus] = useState<Book['status']>('to-read');
+  const [pageCount, setPageCount] = useState<number>(300);
+  const [currentPage, setCurrentPage] = useState<number>(0);
+  const [shelfLocation, setShelfLocation] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [platform, setPlatform] = useState('');
+  const [selectedShelves, setSelectedShelves] = useState<string[]>([]);
 
   if (!isOpen) return null;
 
@@ -92,52 +58,58 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
   };
 
   const handleSelectApiBook = (apiBook: any) => {
-    setValue('title', apiBook.title);
-    setValue('author', apiBook.author);
-    setValue('isbn', apiBook.isbn);
-    setValue('coverUrl', apiBook.coverUrl);
-    setValue('pageCount', apiBook.pageCount);
+    setTitle(apiBook.title);
+    setAuthor(apiBook.author);
+    setIsbn(apiBook.isbn);
+    setCoverUrl(apiBook.coverUrl);
+    setPageCount(apiBook.pageCount);
     // Clear API search states
     setApiSearchQuery('');
     setApiResults([]);
   };
 
-  const onSubmit = async (values: BookFormValues) => {
-    try {
-      await addBookMutation.mutateAsync({
-        title: values.title,
-        author: values.author,
-        isbn: values.isbn || null,
-        coverUrl: values.coverUrl || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=200',
-        format: values.format,
-        status: values.status,
-        currentPage: values.currentPage,
-        pageCount: values.pageCount,
-        customShelfIds: values.customShelfIds,
-        genres: [],
-        platform: values.platform || null,
-        metadata: {
-          shelfLocation: values.format === 'physical' ? values.shelfLocation : undefined,
-          platform: (values.format === 'ebook' || values.format === 'audiobook') ? values.platform : undefined,
-          dueDate: values.format === 'library' && values.dueDate ? new Date(values.dueDate).toISOString() : undefined
-        }
-      });
+  const handleCreateBook = (e: React.FormEvent) => {
+    e.preventDefault();
 
-      // Reset Form and close
-      reset();
-      setApiSearchQuery('');
-      setApiResults([]);
-      onClose();
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to add book to library.');
-    }
+    addBook({
+      title,
+      author,
+      isbn: isbn || undefined,
+      cover_url: coverUrl || `https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=200`,
+      format: formatType,
+      status,
+      platform: platform || undefined,
+      current_page: currentPage,
+      page_count: pageCount,
+      custom_shelf_ids: selectedShelves,
+      metadata: {
+        shelf_location: formatType === 'physical' ? shelfLocation : undefined,
+        device: formatType === 'ebook' ? platform : undefined,
+        due_date: formatType === 'library' && dueDate ? new Date(dueDate).toISOString() : undefined
+      }
+    });
+
+    // Reset Form
+    setTitle('');
+    setAuthor('');
+    setIsbn('');
+    setCoverUrl('');
+    setFormatType('physical');
+    setStatus('to-read');
+    setPageCount(300);
+    setCurrentPage(0);
+    setShelfLocation('');
+    setDueDate('');
+    setPlatform('');
+    setSelectedShelves([]);
+    onClose();
   };
 
   const toggleShelfInSelection = (shelfId: string) => {
     if (selectedShelves.includes(shelfId)) {
-      setValue('customShelfIds', selectedShelves.filter(id => id !== shelfId));
+      setSelectedShelves(selectedShelves.filter(id => id !== shelfId));
     } else {
-      setValue('customShelfIds', [...selectedShelves, shelfId]);
+      setSelectedShelves([...selectedShelves, shelfId]);
     }
   };
 
@@ -148,13 +120,13 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
           <X size={18} />
         </button>
 
-        <h2 style={{ fontSize: '1.5rem', marginBottom: '1.25rem', color: 'var(--text-primary)', borderBottom: '1px solid var(--border-glass)', paddingBottom: '0.5rem', fontFamily: 'var(--font-display)' }}>
+        <h2 style={{ fontSize: '1.5rem', marginBottom: '1.25rem', color: 'var(--text-primary)', borderBottom: '1px solid var(--border-glass)', paddingBottom: '0.5rem' }}>
           Add New Book
         </h2>
 
         {/* Smart Import Section */}
         <div className="glass" style={{ padding: '1rem', background: 'rgba(212, 178, 111, 0.03)', border: '1px solid rgba(212, 178, 111, 0.2)', marginBottom: '1.5rem' }}>
-          <h3 style={{ fontSize: '0.9rem', display: 'flex', gap: '0.4rem', alignItems: 'center', marginBottom: '0.5rem', color: 'var(--accent-primary)', fontWeight: 700 }}>
+          <h3 style={{ fontSize: '0.9rem', display: 'flex', gap: '0.4rem', alignItems: 'center', marginBottom: '0.5rem', color: 'var(--accent-primary)' }}>
             <Sparkles size={14} />
             Smart Import (Open Library API Lookup)
           </h3>
@@ -189,7 +161,7 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
                   onClick={() => handleSelectApiBook(r)}
                 >
                   {r.coverUrl ? (
-                    <img src={r.coverUrl} style={{ width: '24px', height: '36px', objectFit: 'cover', borderRadius: '2px' }} alt="cover" />
+                    <img src={r.coverUrl} style={{ width: '24px', height: '36px', objectFit: 'cover', borderRadius: '2px' }} />
                   ) : (
                     <BookOpen size={16} />
                   )}
@@ -207,36 +179,33 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
         </div>
 
         {/* Manual Entry Form */}
-        <form onSubmit={handleSubmit(onSubmit)} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <form onSubmit={handleCreateBook} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>Title</label>
-              <input type="text" className="form-input" {...register('title')} placeholder="e.g. The Hobbit" />
-              {errors.title && <span style={{ color: 'var(--color-dnf)', fontSize: '0.75rem', marginTop: '0.2rem', display: 'block' }}>{errors.title.message}</span>}
+              <input type="text" className="form-input" value={title} onChange={e => setTitle(e.target.value)} required placeholder="e.g. The Hobbit" />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>Author</label>
-              <input type="text" className="form-input" {...register('author')} placeholder="e.g. J.R.R. Tolkien" />
-              {errors.author && <span style={{ color: 'var(--color-dnf)', fontSize: '0.75rem', marginTop: '0.2rem', display: 'block' }}>{errors.author.message}</span>}
+              <input type="text" className="form-input" value={author} onChange={e => setAuthor(e.target.value)} required placeholder="e.g. J.R.R. Tolkien" />
             </div>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>ISBN-13 (Optional)</label>
-              <input type="text" className="form-input" {...register('isbn')} placeholder="e.g. 9780261102217" />
+              <input type="text" className="form-input" value={isbn} onChange={e => setIsbn(e.target.value)} placeholder="e.g. 9780261102217" />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>Cover Image URL (Optional)</label>
-              <input type="text" className="form-input" {...register('coverUrl')} placeholder="Paste link..." />
-              {errors.coverUrl && <span style={{ color: 'var(--color-dnf)', fontSize: '0.75rem', marginTop: '0.2rem', display: 'block' }}>{errors.coverUrl.message}</span>}
+              <input type="text" className="form-input" value={coverUrl} onChange={e => setCoverUrl(e.target.value)} placeholder="Paste link..." />
             </div>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>Format</label>
-              <select className="form-select" {...register('format')}>
+              <select className="form-select" value={formatType} onChange={e => setFormatType(e.target.value as any)}>
                 <option value="physical">Physical Book</option>
                 <option value="ebook">Ebook (Kindle, PDF)</option>
                 <option value="audiobook">Audiobook</option>
@@ -245,7 +214,7 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
             </div>
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>Status</label>
-              <select className="form-select" {...register('status')}>
+              <select className="form-select" value={status} onChange={e => setStatus(e.target.value as any)}>
                 <option value="to-read">To Read (TBR)</option>
                 <option value="reading">Currently Reading</option>
                 <option value="finished">Finished</option>
@@ -258,13 +227,11 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>Current Page</label>
-              <input type="number" className="form-input" {...register('currentPage', { valueAsNumber: true })} />
-              {errors.currentPage && <span style={{ color: 'var(--color-dnf)', fontSize: '0.75rem', marginTop: '0.2rem', display: 'block' }}>{errors.currentPage.message}</span>}
+              <input type="number" className="form-input" value={currentPage} onChange={e => setCurrentPage(parseInt(e.target.value) || 0)} min={0} max={pageCount} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>Total Pages</label>
-              <input type="number" className="form-input" {...register('pageCount', { valueAsNumber: true })} />
-              {errors.pageCount && <span style={{ color: 'var(--color-dnf)', fontSize: '0.75rem', marginTop: '0.2rem', display: 'block' }}>{errors.pageCount.message}</span>}
+              <input type="number" className="form-input" value={pageCount} onChange={e => setPageCount(parseInt(e.target.value) || 1)} min={1} required />
             </div>
           </div>
 
@@ -272,21 +239,21 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
           {formatType === 'physical' && (
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>Shelf Location</label>
-              <input type="text" className="form-input" placeholder="e.g. Living Room Shelf B" {...register('shelfLocation')} />
+              <input type="text" className="form-input" placeholder="e.g. Living Room Shelf B" value={shelfLocation} onChange={e => setShelfLocation(e.target.value)} />
             </div>
           )}
 
           {formatType === 'library' && (
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>Due Date</label>
-              <input type="date" className="form-input" {...register('dueDate')} />
+              <input type="date" className="form-input" value={dueDate} onChange={e => setDueDate(e.target.value)} />
             </div>
           )}
 
           {(formatType === 'ebook' || formatType === 'audiobook') && (
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>Platform (e.g. Kindle, Audible, Spotify)</label>
-              <input type="text" className="form-input" placeholder="e.g. Kindle" {...register('platform')} />
+              <input type="text" className="form-input" placeholder="e.g. Kindle" value={platform} onChange={e => setPlatform(e.target.value)} />
             </div>
           )}
 
@@ -324,8 +291,8 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
             <button type="button" className="btn btn-secondary" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary" style={{ color: '#091A1E', fontWeight: 700 }} disabled={addBookMutation.isPending}>
-              {addBookMutation.isPending ? 'Saving...' : 'Save Book'}
+            <button type="submit" className="btn btn-primary" style={{ color: '#091A1E', fontWeight: 700 }}>
+              Save Book
             </button>
           </div>
         </form>

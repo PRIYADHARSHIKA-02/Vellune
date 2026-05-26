@@ -1,9 +1,7 @@
 import React, { useRef } from 'react';
-import { useStore } from '../store';
-import { Book, useSessions, useDeleteBook } from '../hooks/queries';
+import { Book, useStore } from '../store';
 import { Book as BookIcon, Smartphone, Headphones, Landmark, Play, Trash2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
-import { useRouter } from 'next/navigation';
 
 interface BookCardProps {
   book: Book;
@@ -12,10 +10,7 @@ interface BookCardProps {
 }
 
 export const BookCard: React.FC<BookCardProps> = ({ book, onSelect, showDelete = false }) => {
-  const { startReadingSession, activeSession } = useStore();
-  const { data: sessions = [] } = useSessions();
-  const deleteBookMutation = useDeleteBook();
-  const router = useRouter();
+  const { startReadingSession, deleteBook, sessions, activeSession, setScreen } = useStore();
   const cardRef = useRef<HTMLDivElement>(null);
 
   const getFormatIcon = (format: Book['format']) => {
@@ -33,21 +28,21 @@ export const BookCard: React.FC<BookCardProps> = ({ book, onSelect, showDelete =
 
   // Find last session for this book
   const bookSessions = sessions
-    .filter(s => s.bookId === book.id)
-    .sort((a, b) => new Date(b.endTime).getTime() - new Date(a.endTime).getTime());
+    .filter(s => s.book_id === book.id)
+    .sort((a, b) => new Date(b.end_time).getTime() - new Date(a.end_time).getTime());
   
-  const lastReadDate = bookSessions.length > 0 ? new Date(bookSessions[0].endTime) : null;
+  const lastReadDate = bookSessions.length > 0 ? new Date(bookSessions[0].end_time) : null;
 
   const handleStartSession = (e: React.MouseEvent) => {
     e.stopPropagation();
     startReadingSession(book.id, 'Home', 'neutral');
-    router.push('/track');
+    setScreen('track');
   };
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (confirm(`Are you sure you want to delete "${book.title}"?`)) {
-      deleteBookMutation.mutate(book.id);
+      deleteBook(book.id);
     }
   };
 
@@ -126,9 +121,9 @@ export const BookCard: React.FC<BookCardProps> = ({ book, onSelect, showDelete =
       {/* 3D Tactile Cover Area */}
       <div className="book-inner-3d" style={coverContainerStyle}>
         <div className="book-spine-3d"></div>
-        {book.coverUrl ? (
+        {book.cover_url ? (
           <img 
-            src={book.coverUrl} 
+            src={book.cover_url} 
             alt={book.title} 
             className="book-cover-image"
             onError={(e) => {
@@ -202,14 +197,14 @@ export const BookCard: React.FC<BookCardProps> = ({ book, onSelect, showDelete =
               <div className="flex-between" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
                 <span>
                   {book.format === 'audiobook' 
-                    ? `${Math.round(book.currentPage)} min / ${book.pageCount} min`
-                    : `p. ${book.currentPage} of ${book.pageCount}`
+                    ? `${Math.round(book.current_page)} min / ${book.page_count} min`
+                    : `p. ${book.current_page} of ${book.page_count}`
                   }
                 </span>
-                <span style={{ fontWeight: 600 }}>{book.progressPercentage}%</span>
+                <span style={{ fontWeight: 600 }}>{book.progress_percentage}%</span>
               </div>
               <div className="progress-bar-container">
-                <div className="progress-bar-fill" style={{ width: `${book.progressPercentage}%` }}></div>
+                <div className="progress-bar-fill" style={{ width: `${book.progress_percentage}%` }}></div>
               </div>
             </div>
           )}
