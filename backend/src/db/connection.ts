@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const connectionString = process.env.DATABASE_URL || 'postgresql://admin:secret_password_123@localhost:5432/vellune_db';
+const connectionString = process.env.DATABASE_URL || 'postgresql://admin:secret_password_123@localhost:5433/vellune_db';
 
 // For postgres-js, we initialize the connection client
 const client = postgres(connectionString, { 

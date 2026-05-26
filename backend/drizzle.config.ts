@@ -8,6 +8,6 @@ export default {
   out: './drizzle',
   driver: 'pg',
   dbCredentials: {
-    connectionString: process.env.DATABASE_URL || 'postgresql://admin:secret_password_123@localhost:5432/vellune_db',
+    connectionString: process.env.DATABASE_URL || 'postgresql://admin:secret_password_123@localhost:5433/vellune_db',
   },
 } satisfies Config;
