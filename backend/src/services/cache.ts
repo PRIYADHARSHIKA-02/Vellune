@@ -4,20 +4,46 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-let redis: Redis | null = null;
+let redisClient: Redis | null = null;
+let redisConnected = false;
+let connectionWarned = false;
+
+const isProduction = process.env.NODE_ENV === 'production';
 
 try {
-  redis = new Redis(redisUrl, {
-    maxRetriesPerRequest: 3,
-    connectTimeout: 5000,
+  redisClient = new Redis(redisUrl, {
+    maxRetriesPerRequest: 1,
+    connectTimeout: 2000,
+    retryStrategy(times) {
+      if (!isProduction && times > 3) {
+        if (!connectionWarned) {
+          console.warn('Redis Cache connection failed or offline. Falling back to local in-memory cache.');
+          connectionWarned = true;
+        }
+        redisConnected = false;
+        return null; // Stop reconnecting in local development to prevent log spam
+      }
+      return Math.min(times * 500, 5000);
+    },
   });
 
-  redis.on('error', (err) => {
-    // Fail silently in development so local dev doesn't crash if Redis is offline
-    console.warn('Redis Cache not running or connection failed:', err.message);
+  redisClient.on('connect', () => {
+    redisConnected = true;
+    console.log('[Redis] Cache connected successfully.');
+  });
+
+  redisClient.on('error', (err) => {
+    redisConnected = false;
+    if (!connectionWarned) {
+      console.warn('Redis Cache connection failed or offline. Falling back to local in-memory cache:', err.message);
+      connectionWarned = true;
+    }
   });
 } catch (e) {
-  console.warn('Could not initialize Redis client:', e);
+  if (!connectionWarned) {
+    console.warn('Could not initialize Redis client, falling back to local in-memory cache:', e);
+    connectionWarned = true;
+  }
 }
 
 export const CACHE_KEYS = {
@@ -36,44 +62,82 @@ export const CACHE_TTL = {
   ACTIVE_SESSION: 60,     // 1 minute
 };
 
+// In-Memory Fallback Cache Interface & Store
+interface CacheEntry {
+  value: any;
+  expiresAt: number;
+}
+
+const memoryCache = new Map<string, CacheEntry>();
+
 export class CacheService {
   static async get(key: string): Promise<any | null> {
-    if (!redis) return null;
-    try {
-      const data = await redis.get(key);
-      return data ? JSON.parse(data) : null;
-    } catch (e) {
+    if (redisConnected && redisClient) {
+      try {
+        const data = await redisClient.get(key);
+        return data ? JSON.parse(data) : null;
+      } catch (e) {
+        // Fall back to memory cache on client error
+      }
+    }
+
+    const entry = memoryCache.get(key);
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) {
+      memoryCache.delete(key);
       return null;
     }
+    return entry.value;
   }
 
   static async set(key: string, value: any, ttlSeconds: number): Promise<void> {
-    if (!redis) return;
-    try {
-      await redis.setex(key, ttlSeconds, JSON.stringify(value));
-    } catch (e) {
-      // Fail-safe
+    if (redisConnected && redisClient) {
+      try {
+        await redisClient.setex(key, ttlSeconds, JSON.stringify(value));
+        return;
+      } catch (e) {
+        // Fall back to memory cache on client error
+      }
     }
+
+    memoryCache.set(key, {
+      value,
+      expiresAt: Date.now() + ttlSeconds * 1000,
+    });
   }
 
   static async del(key: string): Promise<void> {
-    if (!redis) return;
-    try {
-      await redis.del(key);
-    } catch (e) {
-      // Fail-safe
+    if (redisConnected && redisClient) {
+      try {
+        await redisClient.del(key);
+        return;
+      } catch (e) {
+        // Fall back to memory cache on client error
+      }
     }
+
+    memoryCache.delete(key);
   }
 
   static async invalidatePattern(pattern: string): Promise<void> {
-    if (!redis) return;
-    try {
-      const keys = await redis.keys(pattern);
-      if (keys.length > 0) {
-        await redis.del(...keys);
+    if (redisConnected && redisClient) {
+      try {
+        const keys = await redisClient.keys(pattern);
+        if (keys.length > 0) {
+          await redisClient.del(...keys);
+        }
+        return;
+      } catch (e) {
+        // Fall back to memory cache on client error
       }
-    } catch (e) {
-      // Fail-safe
+    }
+
+    // Convert Redis wildcards to regex pattern for memory cache invalidation (e.g., 'user:123:*' -> '^user:123:.*')
+    const regexPattern = new RegExp('^' + pattern.replace(/\*/g, '.*'));
+    for (const key of memoryCache.keys()) {
+      if (regexPattern.test(key)) {
+        memoryCache.delete(key);
+      }
     }
   }
 
