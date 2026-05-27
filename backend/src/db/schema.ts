@@ -8,6 +8,7 @@ export const users = pgTable('users', {
   username: varchar('username', { length: 50 }).unique().notNull(),
   password: varchar('password', { length: 255 }), // local password hash
   fullName: varchar('full_name', { length: 255 }),
+  dob: varchar('dob', { length: 10 }), // YYYY-MM-DD
   avatarUrl: text('avatar_url'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
