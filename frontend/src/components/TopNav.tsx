@@ -21,7 +21,6 @@ const NAVIGATION_ITEMS: NavItem[] = [
   { id: 'track', label: 'Track', icon: Clock },
   { id: 'discover', label: 'Discover', icon: Sparkles },
   { id: 'remember', label: 'Remember', icon: Bookmark },
-  { id: 'groups', label: 'Circles', icon: Users },
   { id: 'stats', label: 'Stats', icon: BarChart3 }
 ];
 

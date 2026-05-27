@@ -20,7 +20,6 @@ const NAVIGATION_ITEMS: NavItem[] = [
   { path: '/track', label: 'Track', icon: Clock },
   { path: '/discover', label: 'Discover', icon: Sparkles },
   { path: '/remember', label: 'Remember', icon: Bookmark },
-  { path: '/groups', label: 'Circles', icon: Users },
   { path: '/stats', label: 'Stats', icon: BarChart3 }
 ];
 
