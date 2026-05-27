@@ -11,7 +11,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_dev_key_for_tokens_12
 
 // POST /api/v1/auth/register
 router.post('/register', async (req, res) => {
-  const { email, username, password, fullName } = req.body;
+  const { email, username, password, fullName, dob } = req.body;
   if (!email || !username || !password) {
     return res.status(400).json({ error: 'Email, username, and password are required.' });
   }
@@ -37,6 +37,7 @@ router.post('/register', async (req, res) => {
       username,
       password: passwordHash,
       fullName: fullName || null,
+      dob: dob || null,
       avatarUrl: `https://api.dicebear.com/7.x/adventurer/svg?seed=${username}`,
     }).returning();
 
@@ -53,6 +54,7 @@ router.post('/register', async (req, res) => {
         email: newUser.email,
         username: newUser.username,
         fullName: newUser.fullName,
+        dob: newUser.dob,
         avatarUrl: newUser.avatarUrl,
       }
     });
@@ -96,6 +98,7 @@ router.post('/login', async (req, res) => {
         email: user.email,
         username: user.username,
         fullName: user.fullName,
+        dob: user.dob,
         avatarUrl: user.avatarUrl,
       }
     });
@@ -122,6 +125,7 @@ router.get('/me', authMiddleware, async (req, res) => {
         email: user.email,
         username: user.username,
         fullName: user.fullName,
+        dob: user.dob,
         avatarUrl: user.avatarUrl,
         preferences: user.preferences,
         readingGoalAnnual: user.readingGoalAnnual,
@@ -137,12 +141,13 @@ router.get('/me', authMiddleware, async (req, res) => {
 // PATCH /api/v1/auth/me
 router.patch('/me', authMiddleware, async (req, res) => {
   const tokenUser = (req as any).user;
-  const { fullName, avatarUrl, readingGoalAnnual, timezone, preferences } = req.body;
+  const { fullName, dob, avatarUrl, readingGoalAnnual, timezone, preferences } = req.body;
 
   try {
     const [updatedUser] = await db.update(users)
       .set({
         ...(fullName !== undefined ? { fullName } : {}),
+        ...(dob !== undefined ? { dob } : {}),
         ...(avatarUrl !== undefined ? { avatarUrl } : {}),
         ...(readingGoalAnnual !== undefined ? { readingGoalAnnual } : {}),
         ...(timezone !== undefined ? { timezone } : {}),
@@ -158,6 +163,7 @@ router.patch('/me', authMiddleware, async (req, res) => {
         email: updatedUser.email,
         username: updatedUser.username,
         fullName: updatedUser.fullName,
+        dob: updatedUser.dob,
         avatarUrl: updatedUser.avatarUrl,
         preferences: updatedUser.preferences,
         readingGoalAnnual: updatedUser.readingGoalAnnual,
