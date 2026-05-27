@@ -122,7 +122,7 @@ export default function ShelfPage() {
         
         {/* Status Tabs */}
         <div style={{ display: 'flex', borderBottom: '1px solid var(--border-glass)', overflowX: 'auto', gap: '1rem', paddingBottom: '0.1rem' }}>
-          {(['all', 'reading', 'to-read', 'finished', 'on-hold', 'dnf'] as const).map(tab => (
+          {(['all', 'reading', 'to-read', 'finished'] as const).map(tab => (
             <button
               key={tab}
               className={`btn-text ${activeTab === tab ? 'active' : ''}`}
@@ -135,7 +135,7 @@ export default function ShelfPage() {
                 fontWeight: 600
               }}
             >
-              {tab === 'to-read' ? 'To Read' : tab === 'dnf' ? 'DNF' : tab}
+              {tab === 'to-read' ? 'To Read' : tab}
             </button>
           ))}
         </div>
