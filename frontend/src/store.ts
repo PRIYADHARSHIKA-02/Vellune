@@ -5,6 +5,7 @@ export interface UserProfile {
   email: string;
   username: string;
   fullName?: string | null;
+  dob?: string | null;
   avatarUrl?: string | null;
   readingGoalAnnual?: number | null;
   timezone?: string | null;
