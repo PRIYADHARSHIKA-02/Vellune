@@ -89,7 +89,7 @@ export const BookCard: React.FC<BookCardProps> = ({ book, onSelect, showDelete =
   };
 
   const isCurrentlyReading = book.status === 'reading';
-  const showProgress = isCurrentlyReading || book.status === 'finished' || book.status === 'on-hold';
+  const showProgress = isCurrentlyReading || book.status === 'finished';
 
   const cardStyle: React.CSSProperties = {
     display: 'flex',
@@ -187,12 +187,7 @@ export const BookCard: React.FC<BookCardProps> = ({ book, onSelect, showDelete =
                 TBR
               </span>
             )}
-            {book.status === 'dnf' && (
-              <span className="status-pill" style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--color-dnf)' }}>
-                <span className="status-dot" style={{ backgroundColor: 'var(--color-dnf)' }}></span>
-                DNF
-              </span>
-            )}
+
           </div>
         </div>
 

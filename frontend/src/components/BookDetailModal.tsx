@@ -532,8 +532,6 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
                     <option value="to-read">To Read (TBR)</option>
                     <option value="reading">Currently Reading</option>
                     <option value="finished">Finished</option>
-                    <option value="on-hold">On Hold</option>
-                    <option value="dnf">Did Not Finish (DNF)</option>
                   </select>
                 </div>
               </div>

@@ -23,7 +23,7 @@ export default function StatsPage() {
 
   // Stats Calculations
   const finishedBooks = books.filter(b => b.status === 'finished');
-  const dnfBooks = books.filter(b => b.status === 'dnf');
+  const toReadBooks = books.filter(b => b.status === 'to-read');
   const currentlyReading = books.filter(b => b.status === 'reading');
   
   const totalPagesRead = sessions.reduce((acc, s) => acc + s.pagesRead, 0);
@@ -387,9 +387,9 @@ export default function StatsPage() {
                   <span style={{ fontWeight: 'bold' }}>{finishedBooks.length}</span>
                 </div>
                 <div className="flex-between" style={{ padding: '0.75rem', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '6px' }}>
-                  <span>DNF Rate (Did Not Finish)</span>
-                  <span style={{ fontWeight: 'bold', color: 'var(--color-dnf)' }}>
-                    {books.length > 0 ? Math.round((dnfBooks.length / books.length) * 100) : 0}%
+                  <span>To Read List (TBR)</span>
+                  <span style={{ fontWeight: 'bold', color: 'var(--color-to-read)' }}>
+                    {toReadBooks.length} books
                   </span>
                 </div>
                 <div className="flex-between" style={{ padding: '0.75rem', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-glass)', borderRadius: '6px' }}>
