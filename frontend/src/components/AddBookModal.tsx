@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store';
 import { useShelves, useAddBook } from '../hooks/queries';
-import { X, Sparkles, BookOpen } from 'lucide-react';
+import { X, Sparkles, BookOpen, Loader2 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
+import { api } from '../lib/api';
 
 const bookBaseSchema = z.object({
   title: z.string().min(1, 'Title is required'),
@@ -12,7 +13,7 @@ const bookBaseSchema = z.object({
   isbn: z.string().optional(),
   coverUrl: z.string().optional(),
   format: z.enum(['physical', 'ebook', 'audiobook', 'library']),
-  status: z.enum(['to-read', 'reading', 'finished', 'on-hold', 'dnf']),
+  status: z.enum(['to-read', 'reading', 'finished']),
   currentPage: z.number().min(0, 'Current page cannot be negative'),
   pageCount: z.number().min(1, 'Page count must be at least 1'),
   platform: z.string().optional(),
@@ -37,10 +38,12 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
   const { data: shelves = [] } = useShelves();
   const addBookMutation = useAddBook();
 
-  // Search Results from Open Library API
+  // Autocomplete Search States
   const [apiSearchQuery, setApiSearchQuery] = useState('');
   const [apiResults, setApiResults] = useState<any[]>([]);
   const [isSearchingApi, setIsSearchingApi] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<BookFormValues>({
     resolver: zodResolver(bookSchema),
@@ -63,44 +66,51 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
   const formatType = watch('format');
   const selectedShelves = watch('customShelfIds') || [];
 
-  if (!isOpen) return null;
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
-  const handleSearchOpenLibrary = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!apiSearchQuery.trim()) return;
-
-    setIsSearchingApi(true);
-    try {
-      const response = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(apiSearchQuery)}&limit=5`);
-      const data = await response.json();
-      
-      const formatted = data.docs.map((doc: any) => ({
-        title: doc.title,
-        author: doc.author_name ? doc.author_name[0] : 'Unknown Author',
-        isbn: doc.isbn ? doc.isbn[0] : '',
-        coverUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg` : '',
-        pageCount: doc.number_of_pages_median || 350
-      }));
-      
-      setApiResults(formatted);
-    } catch (err) {
-      console.error('Error fetching books from Open Library API:', err);
-      alert('Could not retrieve results. Please verify your connection.');
-    } finally {
-      setIsSearchingApi(false);
+  // Debounced live search
+  useEffect(() => {
+    if (!apiSearchQuery.trim()) {
+      setApiResults([]);
+      setShowDropdown(false);
+      return;
     }
-  };
+    const delayDebounceFn = setTimeout(async () => {
+      setIsSearchingApi(true);
+      try {
+        const response = await api.post('/books/search', { query: apiSearchQuery.trim() });
+        setApiResults(response.data || []);
+        setShowDropdown(true);
+      } catch (err) {
+        console.error('Error fetching search suggestions:', err);
+      } finally {
+        setIsSearchingApi(false);
+      }
+    }, 450);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [apiSearchQuery]);
 
   const handleSelectApiBook = (apiBook: any) => {
     setValue('title', apiBook.title);
     setValue('author', apiBook.author);
-    setValue('isbn', apiBook.isbn);
-    setValue('coverUrl', apiBook.coverUrl);
-    setValue('pageCount', apiBook.pageCount);
-    // Clear API search states
+    setValue('isbn', apiBook.isbn || '');
+    setValue('coverUrl', apiBook.coverUrl || '');
+    setValue('pageCount', apiBook.pageCount || 300);
+    setShowDropdown(false);
     setApiSearchQuery('');
-    setApiResults([]);
   };
+
+  if (!isOpen) return null;
 
   const onSubmit = async (values: BookFormValues) => {
     try {
@@ -153,57 +163,101 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
         </h2>
 
         {/* Smart Import Section */}
-        <div className="glass" style={{ padding: '1rem', background: 'rgba(212, 178, 111, 0.03)', border: '1px solid rgba(212, 178, 111, 0.2)', marginBottom: '1.5rem' }}>
+        <div className="glass" style={{ padding: '1rem', background: 'rgba(212, 178, 111, 0.03)', border: '1px solid rgba(212, 178, 111, 0.2)', marginBottom: '1.5rem', position: 'relative' }}>
           <h3 style={{ fontSize: '0.9rem', display: 'flex', gap: '0.4rem', alignItems: 'center', marginBottom: '0.5rem', color: 'var(--accent-primary)', fontWeight: 700 }}>
             <Sparkles size={14} />
-            Smart Import (Open Library API Lookup)
+            Smart Book Import (Google Books & Open Library)
           </h3>
-          <form onSubmit={handleSearchOpenLibrary} style={{ display: 'flex', gap: '0.5rem' }}>
+          <div style={{ position: 'relative' }}>
             <input
               type="text"
               className="form-input"
-              placeholder="Search title, author, or ISBN..."
+              style={{ paddingRight: '2.5rem' }}
+              placeholder="Search title, author, or ISBN to auto-fill..."
               value={apiSearchQuery}
-              onChange={e => setApiSearchQuery(e.target.value)}
+              onChange={e => {
+                setApiSearchQuery(e.target.value);
+                setShowDropdown(true);
+              }}
+              onFocus={() => {
+                if (apiSearchQuery.trim()) {
+                  setShowDropdown(true);
+                }
+              }}
             />
-            <button type="submit" className="btn btn-secondary" style={{ padding: '0.5rem 1rem' }}>
-              {isSearchingApi ? 'Searching...' : 'Search'}
-            </button>
-          </form>
-
-          {/* API Results */}
-          {apiResults.length > 0 && (
-            <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '150px', overflowY: 'auto' }}>
-              {apiResults.map((r, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.75rem',
-                    padding: '0.4rem',
-                    borderRadius: '4px',
-                    background: 'rgba(255,255,255,0.03)',
-                    cursor: 'pointer'
-                  }}
-                  onClick={() => handleSelectApiBook(r)}
-                >
-                  {r.coverUrl ? (
-                    <img src={r.coverUrl} style={{ width: '24px', height: '36px', objectFit: 'cover', borderRadius: '2px' }} alt="cover" />
-                  ) : (
-                    <BookOpen size={16} />
-                  )}
-                  <div style={{ flexGrow: 1, minWidth: 0, fontSize: '0.8rem' }}>
-                    <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>{r.title}</div>
-                    <div style={{ color: 'var(--text-secondary)' }}>by {r.author}</div>
+            {isSearchingApi && (
+              <span style={{ position: 'absolute', right: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--accent-primary)', display: 'flex' }}>
+                <Loader2 size={16} className="animate-spin" />
+              </span>
+            )}
+            
+            {/* Live Autocomplete suggestions dropdown overlay */}
+            {showDropdown && apiSearchQuery.trim() && (
+              <div 
+                ref={dropdownRef}
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  background: 'rgba(9, 26, 30, 0.98)',
+                  backdropFilter: 'blur(12px)',
+                  border: '1px solid var(--border-glass)',
+                  borderRadius: 'var(--radius-md)',
+                  marginTop: '0.5rem',
+                  maxHeight: '220px',
+                  overflowY: 'auto',
+                  zIndex: 50,
+                  boxShadow: '0 10px 30px rgba(0,0,0,0.6)',
+                  scrollbarWidth: 'thin'
+                }}
+              >
+                {isSearchingApi && apiResults.length === 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.25rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                    <Loader2 size={16} className="animate-spin" style={{ marginRight: '0.5rem' }} />
+                    Searching books...
                   </div>
-                  <span style={{ fontSize: '0.7rem', background: 'var(--accent-primary)', padding: '0.15rem 0.4rem', borderRadius: '4px', color: '#091A1E', fontWeight: 600 }}>
-                    Select
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
+                )}
+                {!isSearchingApi && apiResults.length === 0 && (
+                  <div style={{ padding: '1.25rem', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                    No books found
+                  </div>
+                )}
+                {apiResults.map((r, i) => (
+                  <div
+                    key={i}
+                    onClick={() => handleSelectApiBook(r)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      padding: '0.6rem 0.8rem',
+                      borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                      cursor: 'pointer',
+                      transition: 'background 0.15s'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(212, 178, 111, 0.08)'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <img 
+                      src={r.coverUrl || '/fallback-book.png'} 
+                      onError={(e) => { (e.target as HTMLImageElement).src = '/fallback-book.png'; }}
+                      loading="lazy"
+                      style={{ width: '24px', height: '36px', objectFit: 'cover', borderRadius: '2px', flexShrink: 0 }} 
+                      alt="cover" 
+                    />
+                    <div style={{ flexGrow: 1, minWidth: 0, fontSize: '0.8rem' }}>
+                      <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>{r.title}</div>
+                      <div style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>by {r.author}</div>
+                    </div>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--accent-primary)', fontWeight: 600, flexShrink: 0 }}>
+                      Select & Autofill
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Manual Entry Form */}
@@ -249,8 +303,6 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
                 <option value="to-read">To Read (TBR)</option>
                 <option value="reading">Currently Reading</option>
                 <option value="finished">Finished</option>
-                <option value="on-hold">On Hold</option>
-                <option value="dnf">Did Not Finish (DNF)</option>
               </select>
             </div>
           </div>
