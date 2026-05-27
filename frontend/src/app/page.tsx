@@ -1,9 +1,9 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useStore } from '../store';
 import { useBooks, useSessions, useNotes, useCircles } from '../hooks/queries';
-import { Play, Sparkles, BookOpen, Quote, ChevronRight, Landmark, Star } from 'lucide-react';
+import { Play, Sparkles, BookOpen, Quote, ChevronRight, Landmark, Star, Flame, Users, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 export default function HomePage() {
@@ -12,6 +12,7 @@ export default function HomePage() {
   } = useStore();
   
   const router = useRouter();
+  const [showMonthModal, setShowMonthModal] = useState(false);
 
   // React Query server state syncing
   const { data: books = [], isLoading: isBooksLoading } = useBooks();
@@ -63,6 +64,22 @@ export default function HomePage() {
 
   const streakCount = calculateStreak();
 
+  // Helper to determine active streak days (last 7 days)
+  const last7Days = Array.from({ length: 7 }).map((_, idx) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - idx));
+    return d;
+  });
+
+  const hasReadOnDate = (d: Date) => {
+    return sessions.some(s => {
+      const start = new Date(s.startTime);
+      return start.getFullYear() === d.getFullYear() &&
+             start.getMonth() === d.getMonth() &&
+             start.getDate() === d.getDate();
+    });
+  };
+
   const handleStartQuickSession = (bookId: string) => {
     startReadingSession(bookId, 'Home', 'focused');
     router.push('/track');
@@ -100,17 +117,62 @@ export default function HomePage() {
       <div className="bento-grid">
         
         {/* Streak Widget */}
-        <div className="glass bento-card bento-col-4" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '160px' }}>
+        <div 
+          className="glass bento-card bento-col-4" 
+          onClick={() => setShowMonthModal(true)}
+          style={{ 
+            padding: '1.5rem', 
+            display: 'flex', 
+            flexDirection: 'column', 
+            justifyContent: 'space-between', 
+            minHeight: '160px',
+            cursor: 'pointer',
+            transition: 'transform 0.2s, border-color 0.2s',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = 'var(--accent-primary)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = 'var(--border-glass)';
+          }}
+        >
           <div className="flex-between">
             <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Reading Streak</span>
-            <span style={{ fontSize: '1.25rem' }}>🔥</span>
+            <Flame size={18} style={{ color: 'var(--accent-primary)' }} />
           </div>
-          <div style={{ margin: '1rem 0' }}>
+          <div style={{ margin: '0.5rem 0' }}>
             <span style={{ fontSize: '2.5rem', fontWeight: 800, fontFamily: 'var(--font-display)', color: 'var(--accent-primary)' }}>{streakCount}</span>
             <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>days in a row</span>
           </div>
-          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            {streakCount > 0 ? 'Keep it up! Consistency builds strong habits.' : 'Start a session today to begin a new streak!'}
+
+          {/* Daily Streaks Weekly Dots */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', margin: '0.5rem 0 0.75rem 0', background: 'rgba(255,255,255,0.01)', padding: '0.4rem 0.6rem', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255,255,255,0.05)' }}>
+            {last7Days.map((d, idx) => {
+              const active = hasReadOnDate(d);
+              const dayLabel = d.toLocaleDateString('en-US', { weekday: 'narrow' });
+              const isToday = d.toDateString() === new Date().toDateString();
+              return (
+                <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.2rem' }}>
+                  <div 
+                    style={{ 
+                      width: '8px', 
+                      height: '8px', 
+                      borderRadius: '50%', 
+                      background: active ? 'var(--accent-primary)' : 'rgba(255,255,255,0.15)',
+                      boxShadow: active ? '0 0 6px var(--accent-primary)' : 'none',
+                      border: isToday ? '1px solid var(--accent-primary)' : 'none'
+                    }} 
+                  />
+                  <span style={{ fontSize: '0.6rem', color: isToday ? 'var(--accent-primary)' : 'var(--text-muted)', fontWeight: isToday ? 700 : 500 }}>
+                    {dayLabel}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0 }}>
+            {streakCount > 0 ? 'Click to view monthly calendar streak.' : 'Start a session today to begin a new streak!'}
           </p>
         </div>
 
@@ -238,7 +300,7 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Right Column: Quotes & Circles */}
+        {/* Right Column: Quotes/Reflections */}
         <div className="bento-card bento-col-4" style={{ display: 'flex', flexDirection: 'column', gap: '2rem', marginTop: '1rem' }}>
           
           {/* Notes Preview Panel */}
@@ -278,39 +340,90 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Reading Circles Preview */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div className="flex-between">
-              <h2 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-display)' }}>Active Circles</h2>
-              <button className="btn btn-text" onClick={() => router.push('/groups')} style={{ padding: 0, fontSize: '0.8rem' }}>
-                View Circles
-              </button>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {circles.length === 0 ? (
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Join circles to start spoiler-safe discussions.</p>
-              ) : (
-                circles.slice(0, 2).map(circle => (
-                  <div key={circle.id} className="glass" style={{ padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <h4 style={{ fontSize: '0.9rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>{circle.name}</h4>
-                      <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
-                        👥 {circle.members?.length || 1} members
-                      </p>
-                    </div>
-                    <button className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem' }} onClick={() => router.push('/groups')}>
-                      Open
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
         </div>
 
       </div>
+
+      {/* Month Streak Modal Overlay */}
+      {showMonthModal && (
+        <div className="modal-overlay" style={{ display: 'flex', zIndex: 1000 }}>
+          <div className="modal-content glass animate-fade-in" style={{ maxWidth: '380px', padding: '1.5rem' }}>
+            <button className="modal-close" onClick={() => setShowMonthModal(false)}>
+              <X size={18} />
+            </button>
+            
+            <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
+              <h3 style={{ fontSize: '1.2rem', color: 'var(--text-primary)', fontFamily: 'var(--font-display)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                <Flame size={18} style={{ color: 'var(--accent-primary)' }} />
+                {new Date().toLocaleString('default', { month: 'long' })} {new Date().getFullYear()} Streaks
+              </h3>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Days you spent reading this month</p>
+            </div>
+
+            {/* Calendar Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '0.5rem', textAlign: 'center' }}>
+              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, idx) => (
+                <span key={idx} style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, paddingBottom: '0.25rem' }}>
+                  {day}
+                </span>
+              ))}
+              {(() => {
+                const today = new Date();
+                const year = today.getFullYear();
+                const month = today.getMonth();
+                
+                // First day of the month index (0 = Sunday, 1 = Monday...)
+                const firstDayIdx = new Date(year, month, 1).getDay();
+                // Total days in month
+                const totalDays = new Date(year, month + 1, 0).getDate();
+                
+                const items = [];
+                
+                // Pad empty days at start
+                for (let i = 0; i < firstDayIdx; i++) {
+                  items.push(<div key={`empty-${i}`} />);
+                }
+                
+                // Render days of the month
+                for (let day = 1; day <= totalDays; day++) {
+                  const currentDayDate = new Date(year, month, day);
+                  const active = hasReadOnDate(currentDayDate);
+                  const isCurrentDay = currentDayDate.toDateString() === today.toDateString();
+                  
+                  items.push(
+                    <div
+                      key={day}
+                      style={{
+                        aspectRatio: '1',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: '4px',
+                        fontSize: '0.8rem',
+                        fontWeight: isCurrentDay ? 700 : 500,
+                        background: active ? 'var(--accent-primary)' : 'rgba(255,255,255,0.02)',
+                        color: active ? '#091A1E' : isCurrentDay ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                        border: isCurrentDay ? '1px solid var(--accent-primary)' : '1px solid rgba(255,255,255,0.05)',
+                        boxShadow: active ? '0 0 6px var(--accent-primary)' : 'none',
+                      }}
+                    >
+                      {day}
+                    </div>
+                  );
+                }
+                
+                return items;
+              })()}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '1.5rem' }}>
+              <button className="btn btn-secondary" onClick={() => setShowMonthModal(false)} style={{ padding: '0.4rem 1.2rem', fontSize: '0.85rem' }}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
