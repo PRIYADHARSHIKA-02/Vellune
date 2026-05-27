@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { Logo } from './Logo';
 
 interface NavItem {
   path: string;
@@ -29,9 +30,8 @@ export const Sidebar: React.FC = () => {
 
   return (
     <aside className="sidebar">
-      <div className="logo-container">
-        <span className="logo-icon">📚</span>
-        <h1 className="logo-text">Vellune</h1>
+      <div style={{ padding: '0 0.5rem 1.5rem 0.5rem' }}>
+        <Logo size={36} />
       </div>
       
       <nav style={{ flexGrow: 1 }}>

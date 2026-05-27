@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { Logo } from './Logo';
 
 interface NavItem {
   id: string;
@@ -55,9 +56,8 @@ export const TopNav: React.FC = () => {
     <>
       <header className="top-nav">
         {/* Brand Logo */}
-        <Link href="/" className="logo-container" style={{ textDecoration: 'none' }}>
-          <span className="logo-icon">📚</span>
-          <span className="logo-text">Vellune</span>
+        <Link href="/" style={{ textDecoration: 'none' }}>
+          <Logo size={32} />
         </Link>
 
         {/* Center Links (Desktop only) */}
