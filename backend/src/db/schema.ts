@@ -104,6 +104,7 @@ export const readingCircles = pgTable('reading_circles', {
   description: text('description'),
   creatorId: uuid('creator_id').references(() => users.id, { onDelete: 'set null' }),
   currentBookId: uuid('current_book_id').references(() => books.id, { onDelete: 'set null' }),
+  type: varchar('type', { length: 50 }).default('same_book').notNull(), // 'same_book' | 'different_books'
   isPrivate: boolean('is_private').default(true),
   inviteCode: varchar('invite_code', { length: 50 }).unique(),
   maxMembers: integer('max_members').default(10),
@@ -119,6 +120,8 @@ export const circleMembers = pgTable('circle_members', {
   role: varchar('role', { length: 20 }).default('member').notNull(), // 'admin', 'moderator', 'member'
   currentProgress: integer('current_progress').default(0),
   joinedAt: timestamp('joined_at', { withTimezone: true }).defaultNow(),
+  notificationPreference: varchar('notification_preference', { length: 50 }).default('daily').notNull(), // 'all', 'daily', 'mute'
+  muteUntilChapter: integer('mute_until_chapter'),
 });
 
 // Discussion Threads Table
@@ -130,6 +133,8 @@ export const discussionThreads = pgTable('discussion_threads', {
   title: varchar('title', { length: 255 }).notNull(),
   spoilerLevel: integer('spoiler_level').default(0),
   chapter: varchar('chapter', { length: 100 }),
+  chapterTag: varchar('chapter_tag', { length: 100 }),
+  spoilerLevelPage: integer('spoiler_level_page'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
@@ -142,8 +147,24 @@ export const discussionPosts = pgTable('discussion_posts', {
   content: text('content').notNull(),
   parentPostId: uuid('parent_post_id'), // recursive references handled in relations
   reactions: jsonb('reactions').default({}), // {"like": 2, "insightful": 1}
+  chapterTag: varchar('chapter_tag', { length: 100 }),
+  pageReference: integer('page_reference'),
+  isEdited: boolean('is_edited').default(false).notNull(),
+  editWindowExpiresAt: timestamp('edit_window_expires_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+// Circle Invitations Table
+export const circleInvitations = pgTable('circle_invitations', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  circleId: uuid('circle_id').references(() => readingCircles.id, { onDelete: 'cascade' }).notNull(),
+  invitedByUserId: uuid('invited_by_user_id').references(() => users.id, { onDelete: 'set null' }).notNull(),
+  invitedUserId: uuid('invited_user_id').references(() => users.id, { onDelete: 'cascade' }),
+  inviteLinkCode: varchar('invite_link_code', { length: 50 }).unique(),
+  status: varchar('status', { length: 20 }).default('pending').notNull(), // 'pending', 'accepted', 'declined', 'expired'
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
 // Book Recommendations Table
@@ -174,6 +195,8 @@ export const usersRelations = relations(users, ({ many }) => ({
   threadCreator: many(discussionThreads),
   postCreator: many(discussionPosts),
   recommendations: many(recommendations),
+  sentInvitations: many(circleInvitations, { relationName: 'sentInvitations' }),
+  receivedInvitations: many(circleInvitations, { relationName: 'receivedInvitations' }),
 }));
 
 export const booksRelations = relations(books, ({ one, many }) => ({
@@ -199,6 +222,7 @@ export const readingCirclesRelations = relations(readingCircles, ({ one, many })
   currentBook: one(books, { fields: [readingCircles.currentBookId], references: [books.id] }),
   members: many(circleMembers),
   threads: many(discussionThreads),
+  invitations: many(circleInvitations),
 }));
 
 export const circleMembersRelations = relations(circleMembers, ({ one }) => ({
@@ -218,6 +242,12 @@ export const discussionPostsRelations = relations(discussionPosts, ({ one, many 
   user: one(users, { fields: [discussionPosts.userId], references: [users.id] }),
   parentPost: one(discussionPosts, { fields: [discussionPosts.parentPostId], references: [discussionPosts.id], relationName: 'replies' }),
   replies: many(discussionPosts, { relationName: 'replies' }),
+}));
+
+export const circleInvitationsRelations = relations(circleInvitations, ({ one }) => ({
+  circle: one(readingCircles, { fields: [circleInvitations.circleId], references: [readingCircles.id] }),
+  invitedByUser: one(users, { fields: [circleInvitations.invitedByUserId], references: [users.id], relationName: 'sentInvitations' }),
+  invitedUser: one(users, { fields: [circleInvitations.invitedUserId], references: [users.id], relationName: 'receivedInvitations' }),
 }));
 
 export const recommendationsRelations = relations(recommendations, ({ one }) => ({

@@ -267,7 +267,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
   const noteIsFavorite = noteForm.watch('isFavorite');
 
   return (
-    <div className="modal-overlay" style={{ zIndex: 110 }}>
+    <div className="modal-overlay" style={{ zIndex: 2100 }}>
       <div className="modal-content glass animate-fade-in" style={{ maxWidth: '750px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
         <button className="modal-close" onClick={onClose}>
           <X size={18} />
@@ -288,7 +288,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
               <span className={`badge-format ${book.format}`}>{book.format.toUpperCase()}</span>
               <span style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}>
-                Progress: {book.progressPercentage}% ({book.currentPage}/{book.pageCount} pages)
+                Progress: {book.status === 'finished' ? '100.00' : book.progressPercentage}% ({book.status === 'finished' ? book.pageCount : book.currentPage}/{book.pageCount} pages)
               </span>
             </div>
           </div>

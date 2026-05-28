@@ -20,7 +20,7 @@ const NAVIGATION_ITEMS: NavItem[] = [
   { id: 'shelf', label: 'Shelf', icon: Library },
   { id: 'track', label: 'Track', icon: Clock },
   { id: 'discover', label: 'Discover', icon: Sparkles },
-  { id: 'remember', label: 'Remember', icon: Bookmark },
+  { id: 'groups', label: 'Groups', icon: Users },
   { id: 'stats', label: 'Stats', icon: BarChart3 }
 ];
 

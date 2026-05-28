@@ -255,12 +255,22 @@ export interface ReadingCircle {
   description?: string | null;
   creatorId: string;
   currentBookId?: string | null;
+  type?: 'same_book' | 'different_books';
   isPrivate: boolean;
   inviteCode: string;
   maxMembers: number;
   createdAt: string;
   threads?: DiscussionThread[];
   members?: any[];
+  userProgress?: number;
+  userProgressPercentage?: number;
+  othersAvgProgress?: number;
+  othersAvgPercentage?: number;
+  isAhead?: boolean;
+  isBehind?: boolean;
+  notificationPreference?: string;
+  muteUntilChapter?: number | null;
+  currentBook?: Book | null;
 }
 
 export interface DiscussionThread {
@@ -270,7 +280,9 @@ export interface DiscussionThread {
   bookId?: string | null;
   creatorId: string;
   chapter?: string | null;
+  chapterTag?: string | null;
   spoilerLevel: number;
+  spoilerLevelPage?: number | null;
   createdAt: string;
 }
 
@@ -280,13 +292,34 @@ export interface DiscussionPost {
   userId: string;
   content: string;
   parentPostId?: string | null;
-  reactions: Record<string, any>;
+  reactions: Record<string, string[]>; // Map of emoji -> list of userIds
+  chapterTag?: string | null;
+  pageReference?: number | null;
+  isEdited?: boolean;
+  editWindowExpiresAt?: string | null;
   createdAt: string;
   user?: {
     id: string;
     username: string;
     avatarUrl?: string;
   };
+  isHidden?: boolean;
+  hiddenReason?: string;
+}
+
+export interface CircleInvitation {
+  id: string;
+  circleId: string;
+  circleName: string;
+  type?: 'same_book' | 'different_books';
+  maxMembers: number;
+  membersCount: number;
+  bookTitle?: string | null;
+  bookCoverUrl?: string | null;
+  invitedByUsername: string;
+  invitedByUserAvatar?: string | null;
+  createdAt: string;
+  expiresAt: string;
 }
 
 export const useCircles = () => {
@@ -313,7 +346,7 @@ export const useCircle = (id: string | null) => {
 export const useAddCircle = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { name: string; description?: string; currentBookId?: string; isPrivate?: boolean; maxMembers?: number }) => {
+    mutationFn: async (data: { name: string; description?: string; currentBookId?: string; type?: string; isPrivate?: boolean; maxMembers?: number }) => {
       const response = await api.post('/circles', data);
       return response.data;
     },
@@ -339,7 +372,7 @@ export const useJoinCircle = () => {
 export const useAddThread = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ circleId, data }: { circleId: string; data: { title: string; bookId?: string; chapter?: string; spoilerLevel?: number } }) => {
+    mutationFn: async ({ circleId, data }: { circleId: string; data: { title: string; bookId?: string; chapter?: string; chapterTag?: string; spoilerLevelPage?: number } }) => {
       const response = await api.post(`/circles/${circleId}/threads`, data);
       return response.data;
     },
@@ -349,11 +382,12 @@ export const useAddThread = () => {
   });
 };
 
-export const useThreadPosts = (threadId: string | null) => {
+export const useThreadPosts = (threadId: string | null, revealPostIds: string[] = []) => {
+  const revealParam = revealPostIds.length > 0 ? `?reveal_post_ids=${revealPostIds.join(',')}` : '';
   return useQuery<DiscussionPost[]>({
-    queryKey: ['threads', threadId, 'posts'],
+    queryKey: ['threads', threadId, 'posts', revealPostIds],
     queryFn: async () => {
-      const response = await api.get(`/circles/threads/${threadId}/posts`);
+      const response = await api.get(`/circles/threads/${threadId}/posts${revealParam}`);
       return response.data;
     },
     enabled: !!threadId,
@@ -363,12 +397,176 @@ export const useThreadPosts = (threadId: string | null) => {
 export const useAddPost = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ threadId, content, parentPostId }: { threadId: string; content: string; parentPostId?: string }) => {
-      const response = await api.post(`/circles/threads/${threadId}/posts`, { content, parentPostId });
+    mutationFn: async ({ threadId, content, parentPostId, chapterTag, pageReference }: { threadId: string; content: string; parentPostId?: string; chapterTag: string; pageReference: number }) => {
+      const response = await api.post(`/circles/threads/${threadId}/posts`, { content, parentPostId, chapterTag, pageReference });
       return response.data;
     },
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['threads', variables.threadId, 'posts'] });
+      queryClient.invalidateQueries({ queryKey: ['circles'] });
     },
+  });
+};
+
+export const useCircleMembers = (circleId: string | null) => {
+  return useQuery<any[]>({
+    queryKey: ['circles', circleId, 'members'],
+    queryFn: async () => {
+      const response = await api.get(`/circles/${circleId}/members`);
+      return response.data;
+    },
+    enabled: !!circleId
+  });
+};
+
+export const useUpdateCircleSettings = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, updates }: { id: string; updates: { name?: string; description?: string; currentBookId?: string | null } }) => {
+      const response = await api.patch(`/circles/${id}`, updates);
+      return response.data;
+    },
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['circles'] });
+      queryClient.invalidateQueries({ queryKey: ['circles', variables.id] });
+    }
+  });
+};
+
+export const useLeaveCircle = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (circleId: string) => {
+      const response = await api.post(`/circles/${circleId}/leave`);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['circles'] });
+    }
+  });
+};
+
+export const useDeleteCircle = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (circleId: string) => {
+      const response = await api.delete(`/circles/${circleId}`);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['circles'] });
+    }
+  });
+};
+
+export const useUpdateMemberSettings = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ circleId, currentProgress, notificationPreference, muteUntilChapter }: { circleId: string; currentProgress?: number; notificationPreference?: string; muteUntilChapter?: number | null }) => {
+      const response = await api.patch(`/circles/${circleId}/members/me`, { currentProgress, notificationPreference, muteUntilChapter });
+      return response.data;
+    },
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['circles', variables.circleId] });
+      queryClient.invalidateQueries({ queryKey: ['circles'] });
+    }
+  });
+};
+
+export const useInviteToCircle = () => {
+  return useMutation({
+    mutationFn: async ({ circleId, username }: { circleId: string; username?: string }) => {
+      const response = await api.post(`/circles/${circleId}/invite`, { username });
+      return response.data;
+    }
+  });
+};
+
+export const useInvitations = () => {
+  return useQuery<CircleInvitation[]>({
+    queryKey: ['invitations'],
+    queryFn: async () => {
+      const response = await api.get('/invitations');
+      return response.data;
+    }
+  });
+};
+
+export const useAcceptInvitation = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (code: string) => {
+      const response = await api.post(`/invitations/${code}/accept`);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['circles'] });
+      queryClient.invalidateQueries({ queryKey: ['invitations'] });
+    }
+  });
+};
+
+export const useDeclineInvitation = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const response = await api.post(`/invitations/${id}/decline`);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invitations'] });
+    }
+  });
+};
+
+export const useUndoDeclineInvitation = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const response = await api.post(`/invitations/${id}/undo`);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invitations'] });
+    }
+  });
+};
+
+export const useEditPost = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ postId, content, threadId }: { postId: string; content: string; threadId: string }) => {
+      const response = await api.patch(`/circles/posts/${postId}`, { content });
+      return response.data;
+    },
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['threads', variables.threadId, 'posts'] });
+    }
+  });
+};
+
+export const useDeletePost = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ postId, threadId }: { postId: string; threadId: string }) => {
+      const response = await api.delete(`/circles/posts/${postId}`);
+      return response.data;
+    },
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['threads', variables.threadId, 'posts'] });
+    }
+  });
+};
+
+export const useToggleReaction = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ postId, reaction, threadId }: { postId: string; reaction: string; threadId: string }) => {
+      const response = await api.post(`/circles/posts/${postId}/react`, { reaction });
+      return response.data;
+    },
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['threads', variables.threadId, 'posts'] });
+    }
   });
 };

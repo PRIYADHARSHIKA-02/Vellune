@@ -206,22 +206,33 @@ export const BookCard: React.FC<BookCardProps> = ({ book, onSelect, showDelete =
             <div style={{ marginBottom: '0.5rem' }}>
               <div className="flex-between" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
                 <span>
-                  {book.format === 'audiobook' 
-                    ? `${Math.round(book.currentPage)} min / ${book.pageCount} min`
-                    : `p. ${book.currentPage} of ${book.pageCount}`
+                  {book.status === 'finished'
+                    ? (book.format === 'audiobook'
+                      ? `${book.pageCount} min / ${book.pageCount} min`
+                      : `p. ${book.pageCount} of ${book.pageCount}`
+                    )
+                    : (book.format === 'audiobook' 
+                      ? `${Math.round(book.currentPage)} min / ${book.pageCount} min`
+                      : `p. ${book.currentPage} of ${book.pageCount}`
+                    )
                   }
                 </span>
-                <span style={{ fontWeight: 600 }}>{book.progressPercentage}%</span>
+                <span style={{ fontWeight: 600 }}>
+                  {book.status === 'finished' ? '100.00' : book.progressPercentage}%
+                </span>
               </div>
               <div className="progress-bar-container">
-                <div className="progress-bar-fill" style={{ width: `${book.progressPercentage}%` }}></div>
+                <div className="progress-bar-fill" style={{ width: `${book.status === 'finished' ? '100' : book.progressPercentage}%` }}></div>
               </div>
             </div>
           )}
 
           <div className="flex-between" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
             <span>
-              {lastReadDate ? `Read ${formatDistanceToNow(lastReadDate)} ago` : 'Not read yet'}
+              {book.status === 'finished'
+                ? null
+                : (lastReadDate ? `Read ${formatDistanceToNow(lastReadDate)} ago` : 'Not read yet')
+              }
             </span>
 
             {/* Quick Session Start */}
