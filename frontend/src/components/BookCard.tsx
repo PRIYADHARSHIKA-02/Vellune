@@ -164,6 +164,16 @@ export const BookCard: React.FC<BookCardProps> = ({ book, onSelect, showDelete =
             by {book.author}
           </p>
 
+          {book.genres && book.genres.length > 0 && (
+            <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.35rem', marginBottom: '0.15rem' }}>
+              {book.genres.map(g => (
+                <span key={g} style={{ fontSize: '0.65rem', padding: '0.1rem 0.4rem', borderRadius: '4px', backgroundColor: 'rgba(212, 178, 111, 0.1)', color: 'var(--accent-primary)', border: '1px solid rgba(212, 178, 111, 0.15)', textTransform: 'capitalize', fontWeight: 600 }}>
+                  {g}
+                </span>
+              ))}
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
             <span className={`badge-format ${book.format}`}>
               {getFormatIcon(book.format)}

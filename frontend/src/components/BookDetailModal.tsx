@@ -17,6 +17,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { Editor } from './Editor';
 
+const PRIMARY_GENRES = ['Romance', 'Dark', 'Psychothriller', 'Self Help', 'Fiction', 'Fantasy'];
+
 interface BookDetailModalProps {
   bookId: string;
   onClose: () => void;
@@ -70,6 +72,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
     shelfLocation: z.string().optional(),
     dueDate: z.string().optional(),
     customShelfIds: z.array(z.string()),
+    genres: z.array(z.string()),
   });
 
   const editBookSchema = editBookBaseSchema.refine(data => data.currentPage <= data.pageCount, {
@@ -92,6 +95,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
       shelfLocation: '',
       dueDate: '',
       customShelfIds: [],
+      genres: [],
     }
   });
 
@@ -109,6 +113,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
         shelfLocation: book.metadata?.shelfLocation || '',
         dueDate: book.metadata?.dueDate ? book.metadata.dueDate.substring(0, 10) : '',
         customShelfIds: book.customShelfIds || [],
+        genres: book.genres || [],
       });
     }
   }, [book, editBookForm]);
@@ -176,6 +181,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
           currentPage: values.currentPage,
           pageCount: values.pageCount,
           customShelfIds: values.customShelfIds,
+          genres: values.genres,
           platform: values.platform || null,
           metadata: {
             ...book.metadata,
@@ -235,6 +241,15 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
     }
   };
 
+  const toggleGenreSelection = (genre: string) => {
+    const current = editBookForm.getValues('genres') || [];
+    if (current.includes(genre)) {
+      editBookForm.setValue('genres', current.filter(g => g !== genre));
+    } else {
+      editBookForm.setValue('genres', [...current, genre]);
+    }
+  };
+
   const handleDelete = async () => {
     if (confirm(`Are you sure you want to permanently delete "${book.title}"?`)) {
       try {
@@ -248,6 +263,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
 
   const editFormatType = editBookForm.watch('format');
   const editBookShelves = editBookForm.watch('customShelfIds') || [];
+  const editBookGenres = editBookForm.watch('genres') || [];
   const noteIsFavorite = noteForm.watch('isFavorite');
 
   return (
@@ -562,6 +578,37 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
                   <input type="date" className="form-input" {...editBookForm.register('dueDate')} />
                 </div>
               )}
+
+              {/* Genre Checkboxes */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Genres / Categories</label>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+                  {PRIMARY_GENRES.map(g => {
+                    const isSelected = editBookGenres.map(x => x.toLowerCase()).includes(g.toLowerCase());
+                    return (
+                      <button
+                        key={g}
+                        type="button"
+                        onClick={() => toggleGenreSelection(g)}
+                        style={{
+                          padding: '0.4rem 0.75rem',
+                          fontSize: '0.75rem',
+                          borderRadius: 'var(--radius-sm)',
+                          border: '1px solid',
+                          cursor: 'pointer',
+                          backgroundColor: isSelected ? 'rgba(212, 178, 111, 0.12)' : 'transparent',
+                          borderColor: isSelected ? 'var(--accent-primary)' : 'var(--border-glass)',
+                          color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
+                          transition: 'all 0.2s ease',
+                          textTransform: 'capitalize'
+                        }}
+                      >
+                        {g}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
               {/* Collections Checkboxes */}
               <div>

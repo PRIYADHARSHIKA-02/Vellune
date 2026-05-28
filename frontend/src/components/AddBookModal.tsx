@@ -7,6 +7,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { api } from '../lib/api';
 
+const PRIMARY_GENRES = ['Romance', 'Dark', 'Psychothriller', 'Self Help', 'Fiction', 'Fantasy'];
+
 const bookBaseSchema = z.object({
   title: z.string().min(1, 'Title is required'),
   author: z.string().min(1, 'Author is required'),
@@ -20,6 +22,7 @@ const bookBaseSchema = z.object({
   shelfLocation: z.string().optional(),
   dueDate: z.string().optional(),
   customShelfIds: z.array(z.string()),
+  genres: z.array(z.string()),
 });
 
 const bookSchema = bookBaseSchema.refine(data => data.currentPage <= data.pageCount, {
@@ -60,11 +63,13 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
       shelfLocation: '',
       dueDate: '',
       customShelfIds: [],
+      genres: [],
     }
   });
 
   const formatType = watch('format');
   const selectedShelves = watch('customShelfIds') || [];
+  const selectedGenres = watch('genres') || [];
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -106,6 +111,7 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
     setValue('isbn', apiBook.isbn || '');
     setValue('coverUrl', apiBook.coverUrl || '');
     setValue('pageCount', apiBook.pageCount || 300);
+    setValue('genres', apiBook.genres || []);
     setShowDropdown(false);
     setApiSearchQuery('');
   };
@@ -124,7 +130,7 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
         currentPage: values.currentPage,
         pageCount: values.pageCount,
         customShelfIds: values.customShelfIds,
-        genres: [],
+        genres: values.genres,
         platform: values.platform || null,
         metadata: {
           shelfLocation: values.format === 'physical' ? values.shelfLocation : undefined,
@@ -148,6 +154,14 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
       setValue('customShelfIds', selectedShelves.filter(id => id !== shelfId));
     } else {
       setValue('customShelfIds', [...selectedShelves, shelfId]);
+    }
+  };
+
+  const toggleGenreInSelection = (genre: string) => {
+    if (selectedGenres.includes(genre)) {
+      setValue('genres', selectedGenres.filter(g => g !== genre));
+    } else {
+      setValue('genres', [...selectedGenres, genre]);
     }
   };
 
@@ -341,6 +355,37 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
               <input type="text" className="form-input" placeholder="e.g. Kindle" {...register('platform')} />
             </div>
           )}
+
+          {/* Genre Checkboxes */}
+          <div>
+            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Genres / Categories</label>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+              {PRIMARY_GENRES.map(g => {
+                const isSelected = selectedGenres.map(x => x.toLowerCase()).includes(g.toLowerCase());
+                return (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => toggleGenreInSelection(g)}
+                    style={{
+                      padding: '0.35rem 0.65rem',
+                      fontSize: '0.75rem',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid',
+                      cursor: 'pointer',
+                      backgroundColor: isSelected ? 'rgba(212, 178, 111, 0.12)' : 'transparent',
+                      borderColor: isSelected ? 'var(--accent-primary)' : 'var(--border-glass)',
+                      color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      transition: 'all 0.15s ease',
+                      textTransform: 'capitalize'
+                    }}
+                  >
+                    {g}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           {/* Shelves Checkboxes */}
           <div>
