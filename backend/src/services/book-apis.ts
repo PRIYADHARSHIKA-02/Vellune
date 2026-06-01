@@ -10,6 +10,8 @@ export interface ExternalBook {
   publisher?: string;
   description?: string;
   genres: string[];
+  averageRating?: number;
+  ratingsCount?: number;
 }
 
 export class BookAPIService {
@@ -54,6 +56,8 @@ export class BookAPIService {
           publisher: info.publisher || undefined,
           description: info.description || undefined,
           genres: info.categories || [],
+          averageRating: info.averageRating || undefined,
+          ratingsCount: info.ratingsCount || undefined,
         };
       });
     } catch (e: any) {

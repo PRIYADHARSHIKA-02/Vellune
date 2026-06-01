@@ -18,13 +18,21 @@ const shelfSchema = z.object({
 type ShelfFormValues = z.infer<typeof shelfSchema>;
 
 export default function ShelfPage() {
-  const { setSelectedBookIdForDetail } = useStore();
+  const { setSelectedBookIdForDetail, setDefaultAddBookStatus } = useStore();
 
   // State filters
   const [activeTab, setActiveTab] = useState<Book['status'] | 'all'>('all');
   const [selectedFormat, setSelectedFormat] = useState<Book['format'] | 'all'>('all');
   const [selectedShelf, setSelectedShelf] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+
+  React.useEffect(() => {
+    if (activeTab === 'to-read' || activeTab === 'reading' || activeTab === 'finished') {
+      setDefaultAddBookStatus(activeTab);
+    } else {
+      setDefaultAddBookStatus('to-read');
+    }
+  }, [activeTab, setDefaultAddBookStatus]);
   
   // Modals state
   const [isAddOpen, setIsAddOpen] = useState(false);

@@ -14,29 +14,16 @@ router.get('/', authMiddleware, async (req, res) => {
   try {
     const userBooks = await db.query.books.findMany({
       where: eq(books.userId, tokenUser.id),
-      orderBy: (b, { desc }) => [desc(b.dateAdded)]
+      orderBy: (b, { desc }) => [desc(b.dateAdded)],
+      with: {
+        userReviews: {
+          where: (ur, { isNull }) => isNull(ur.deletedAt)
+        }
+      }
     });
     return res.json(userBooks);
   } catch (error: any) {
     console.error('Fetch books error:', error);
-    return res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
-
-// GET /api/v1/books/:id - Retrieve details of a specific book (Database Only - Phase 1)
-router.get('/:id', authMiddleware, async (req, res) => {
-  const tokenUser = (req as any).user;
-  const { id } = req.params;
-  try {
-    const book = await db.query.books.findFirst({
-      where: and(eq(books.id, id), eq(books.userId, tokenUser.id))
-    });
-    if (!book) {
-      return res.status(404).json({ error: 'Book not found.' });
-    }
-    return res.json(book);
-  } catch (error: any) {
-    console.error('Fetch book error:', error);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -70,6 +57,86 @@ router.post('/search', authMiddleware, async (req, res) => {
     return res.json(results);
   } catch (error: any) {
     console.error('Book search error:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /api/v1/books/search - Search books (GET style, returns normalized info with shelf status)
+router.get('/search', authMiddleware, async (req, res) => {
+  const tokenUser = (req as any).user;
+  const { q } = req.query;
+  if (!q || String(q).trim() === '') {
+    return res.status(400).json({ error: 'Search query parameter "q" is required.' });
+  }
+
+  const queryStr = String(q).trim();
+  if (queryStr.length < 2) {
+    return res.status(400).json({ error: 'Search query must be at least 2 characters.' });
+  }
+
+  const sanitizedQuery = queryStr.toLowerCase();
+  const cacheKey = `search:query:get:${sanitizedQuery}`;
+  const CACHE_TTL_SEARCH = 86400; // 24 hours
+
+  try {
+    const cachedResults = await CacheService.get(cacheKey);
+    let results = cachedResults;
+
+    if (!results) {
+      console.log(`[Redis] Cache Miss for GET search: "${sanitizedQuery}". Fetching from external APIs...`);
+      results = await BookAPIService.search(sanitizedQuery);
+      await CacheService.set(cacheKey, results, CACHE_TTL_SEARCH);
+    } else {
+      console.log(`[Redis] Cache Hit for GET search: "${sanitizedQuery}"`);
+    }
+
+    const normalisedResults = results.map((book: any) => {
+      let year = null;
+      if (book.publishedDate) {
+        const match = book.publishedDate.match(/^(\d{4})/);
+        if (match) year = parseInt(match[1]);
+      }
+
+      return {
+        title: book.title,
+        author: book.author,
+        isbn: book.isbn || null,
+        cover_url: book.coverUrl || null,
+        year: year,
+        genres: book.genres || [],
+        external_avg_rating: book.averageRating || 4.2,
+        external_rating_count: book.ratingsCount || 120,
+        onShelf: false,
+        savedBookId: null
+      };
+    });
+
+    return res.json(normalisedResults);
+  } catch (error: any) {
+    console.error('Book search GET error:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /api/v1/books/:id - Retrieve details of a specific book (Database Only - Phase 1)
+router.get('/:id', authMiddleware, async (req, res) => {
+  const tokenUser = (req as any).user;
+  const { id } = req.params;
+  try {
+    const book = await db.query.books.findFirst({
+      where: and(eq(books.id, id), eq(books.userId, tokenUser.id)),
+      with: {
+        userReviews: {
+          where: (ur, { isNull }) => isNull(ur.deletedAt)
+        }
+      }
+    });
+    if (!book) {
+      return res.status(404).json({ error: 'Book not found.' });
+    }
+    return res.json(book);
+  } catch (error: any) {
+    console.error('Fetch book error:', error);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });

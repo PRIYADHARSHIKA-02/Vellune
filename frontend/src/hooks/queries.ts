@@ -26,6 +26,7 @@ export interface Book {
   dateStarted?: string | null;
   dateFinished?: string | null;
   dateAdded: string;
+  userReviews?: UserBookReview[];
 }
 
 export const useBooks = () => {
@@ -100,6 +101,158 @@ export const useSearchBooks = (query: string, enabled: boolean = false) => {
     enabled: enabled && !!query,
   });
 };
+
+// --- REVIEW HOOKS & TYPES ---
+
+export interface ExternalReview {
+  id: string;
+  source: 'goodreads' | 'nyt' | 'guardian' | 'openlibrary' | 'amazon' | 'librarything' | 'Your friends';
+  starRating: number | null;
+  excerpt: string;
+  reviewerType: 'editorial' | 'community';
+  helpfulVotes: number;
+  sourceUrl?: string | null;
+  createdAt: string;
+}
+
+export interface BookRatingAggregate {
+  weightedAvgScore: string;
+  totalRatingCount: number;
+  positivePct: number;
+  neutralPct: number;
+  criticalPct: number;
+  ratingDistribution: Record<string, number>;
+  lastUpdatedAt: string;
+}
+
+export interface UserBookReview {
+  id: string;
+  userId: string;
+  bookId: string;
+  starRating: string;
+  moodTags: string[];
+  recommend: 'yes' | 'depends' | 'no' | null;
+  reviewText: string | null;
+  isShared: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReviewsResponse {
+  status: 'success' | 'fetching';
+  aggregate: BookRatingAggregate | null;
+  sentiment: {
+    positive: number;
+    neutral: number;
+    critical: number;
+  };
+  reviews: ExternalReview[];
+  user_review: UserBookReview | null;
+}
+
+export const useBookReviews = (bookIdOrIsbn: string | null, sourceFilter?: string) => {
+  return useQuery<ReviewsResponse>({
+    queryKey: ['reviews', bookIdOrIsbn, sourceFilter],
+    queryFn: async () => {
+      if (!bookIdOrIsbn) throw new Error('ISBN or Book ID is required');
+      const params = sourceFilter ? { source: sourceFilter } : {};
+      const response = await api.get(`/books/${bookIdOrIsbn}/reviews`, { params });
+      return response.data;
+    },
+    enabled: !!bookIdOrIsbn,
+    refetchInterval: (query) => {
+      // Poll every 2 seconds if background service is still fetching
+      return query.state.data?.status === 'fetching' ? 2000 : false;
+    }
+  });
+};
+
+export const useBookReviewAggregate = (bookIdOrIsbn: string | null) => {
+  return useQuery<BookRatingAggregate>({
+    queryKey: ['reviews', 'aggregate', bookIdOrIsbn],
+    queryFn: async () => {
+      if (!bookIdOrIsbn) throw new Error('ISBN or Book ID is required');
+      const response = await api.get(`/books/${bookIdOrIsbn}/reviews/aggregate`);
+      return response.data;
+    },
+    enabled: !!bookIdOrIsbn,
+  });
+};
+
+export const useSaveReview = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ bookId, data }: { 
+      bookId: string; 
+      data: {
+        star_rating: number;
+        mood_tags: string[];
+        recommend: 'yes' | 'depends' | 'no' | null;
+        review_text: string | null;
+        is_shared: boolean;
+      } 
+    }) => {
+      const response = await api.post(`/books/${bookId}/reviews`, data);
+      return response.data;
+    },
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['reviews'] });
+      queryClient.invalidateQueries({ queryKey: ['books'] });
+      queryClient.invalidateQueries({ queryKey: ['books', variables.bookId] });
+    }
+  });
+};
+
+export const useUpdateReview = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ reviewId, updates }: { 
+      reviewId: string; 
+      updates: Partial<{
+        star_rating: number;
+        mood_tags: string[];
+        recommend: 'yes' | 'depends' | 'no' | null;
+        review_text: string | null;
+        is_shared: boolean;
+      }> 
+    }) => {
+      const response = await api.patch(`/reviews/${reviewId}`, updates);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reviews'] });
+      queryClient.invalidateQueries({ queryKey: ['books'] });
+    }
+  });
+};
+
+export const useDeleteReview = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (reviewId: string) => {
+      const response = await api.delete(`/reviews/${reviewId}`);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reviews'] });
+      queryClient.invalidateQueries({ queryKey: ['books'] });
+    }
+  });
+};
+
+// GET style search with shelf state included
+export const useGetSearchBooks = (query: string, enabled: boolean = false) => {
+  return useQuery<any[]>({
+    queryKey: ['books', 'search-get', query],
+    queryFn: async () => {
+      if (!query || query.trim() === '') return [];
+      const response = await api.get(`/books/search`, { params: { q: query } });
+      return response.data;
+    },
+    enabled: enabled && !!query,
+  });
+};
+
 
 
 // --- READING SESSION HOOKS ---

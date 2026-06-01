@@ -3,7 +3,7 @@ import { useStore } from '../store';
 import { 
   BookOpen, Library, Clock, Sparkles, 
   Bookmark, Users, BarChart3, Sun, Moon,
-  LogOut, User, Settings, Save, X, Edit2
+  LogOut, User, Settings, Save, X, Edit2, Search
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -83,6 +83,16 @@ export const TopNav: React.FC = () => {
 
         {/* Right side controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }} ref={dropdownRef}>
+          {/* Quick search toggler */}
+          <button 
+            className="btn btn-text"
+            style={{ padding: '0.4rem', color: 'var(--text-secondary)' }}
+            onClick={() => router.push('/discover?focus=true')}
+            title="Search Books"
+          >
+            <Search size={18} />
+          </button>
+
           {/* Quick theme toggler */}
           <button 
             className="btn btn-text"

@@ -8,6 +8,7 @@ import { ActiveSessionTracker } from '../components/ActiveSessionTracker';
 import { EndSessionModal } from '../components/EndSessionModal';
 import { BookDetailModal } from '../components/BookDetailModal';
 import { AddBookModal } from '../components/AddBookModal';
+import { PostReadSheet } from '../components/PostReadSheet';
 import { Plus } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 
@@ -40,6 +41,8 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     initStore, 
     selectedBookIdForDetail, 
     setSelectedBookIdForDetail,
+    finishedBookToRate,
+    setFinishedBookToRate,
     isAuthenticated 
   } = useStore();
   
@@ -176,6 +179,14 @@ export default function Providers({ children }: { children: React.ReactNode }) {
             isOpen={isAddBookOpen} 
             onClose={() => setIsAddBookOpen(false)} 
           />
+
+          {/* Post-Read Rating Bottom Sheet (Component B) */}
+          {finishedBookToRate && (
+            <PostReadSheet 
+              book={finishedBookToRate} 
+              onClose={() => setFinishedBookToRate(null)} 
+            />
+          )}
         </>
       )}
     </QueryClientProvider>

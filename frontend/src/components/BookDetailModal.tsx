@@ -5,12 +5,15 @@ import {
   useSessions, 
   useNotes, 
   useShelves, 
+  useAddBook,
   useUpdateBook, 
   useDeleteBook, 
   useAddNote, 
-  useAddSession 
+  useAddSession,
+  useBookReviews,
+  useDeleteReview
 } from '../hooks/queries';
-import { X, Plus, Clock, Bookmark, Info, Edit3, Trash2, Calendar, Star, Loader2 } from 'lucide-react';
+import { X, Plus, Clock, Bookmark, Info, Edit3, Trash2, Calendar, Star, Loader2, BookOpen, ThumbsUp, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
 import { format } from 'date-fns';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -45,20 +48,44 @@ type NoteFormValues = z.infer<typeof noteSchema>;
 type LogPastFormValues = z.infer<typeof logPastSchema>;
 
 export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClose }) => {
+  const { selectedExternalBook, setFinishedBookToRate } = useStore();
+  
   const { data: books = [] } = useBooks();
   const { data: sessions = [] } = useSessions();
   const { data: notes = [] } = useNotes();
   const { data: shelves = [] } = useShelves();
 
+  const addBookMutation = useAddBook();
   const updateBookMutation = useUpdateBook();
   const deleteBookMutation = useDeleteBook();
   const addNoteMutation = useAddNote();
   const addSessionMutation = useAddSession();
+  const deleteReviewMutation = useDeleteReview();
 
-  const book = books.find(b => b.id === bookId);
+  // Find if book is on shelf (DB match by ID only; do not match by ISBN when opened as external discover log)
+  const shelfBook = books.find(b => b.id === bookId);
+  const isShelfBook = !!shelfBook;
+  
+  // Use shelf book details if available, else fallback to external search result
+  const book = shelfBook || selectedExternalBook;
 
-  const [activeTab, setActiveTab] = useState<'notes' | 'sessions' | 'edit'>('notes');
+  const [activeTab, setActiveTab] = useState<'about' | 'reviews' | 'similar'>('about');
   const [showLogPast, setShowLogPast] = useState(false);
+  const [showFormatPicker, setShowFormatPicker] = useState(false);
+
+  // Collapsible sections for shelf actions in "About" tab
+  const [showProgressSection, setShowProgressSection] = useState(true);
+  const [showNotesSection, setShowNotesSection] = useState(false);
+  const [showSessionsSection, setShowSessionsSection] = useState(false);
+  const [showEditSection, setShowEditSection] = useState(false);
+
+  // Component A state
+  const [selectedSource, setSelectedSource] = useState<string>('All');
+  const [isBreakdownExpanded, setIsBreakdownExpanded] = useState<boolean>(false);
+  const [selectedFullReview, setSelectedFullReview] = useState<any | null>(null);
+
+  // Reviews Hook (only fetch for external books, not shelf books)
+  const { data: reviewsResponse, isLoading: isReviewsLoading } = useBookReviews(!isShelfBook ? (book?.isbn || book?.id || null) : null, selectedSource === 'All' ? undefined : selectedSource);
 
   // Edit Book Form setup
   const editBookBaseSchema = z.object({
@@ -101,22 +128,29 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
 
   // Populate edit form when book loads
   useEffect(() => {
-    if (book) {
+    if (shelfBook) {
       editBookForm.reset({
-        title: book.title,
-        author: book.author,
-        format: book.format,
-        status: book.status,
-        currentPage: book.currentPage,
-        pageCount: book.pageCount,
-        platform: book.platform || '',
-        shelfLocation: book.metadata?.shelfLocation || '',
-        dueDate: book.metadata?.dueDate ? book.metadata.dueDate.substring(0, 10) : '',
-        customShelfIds: book.customShelfIds || [],
-        genres: book.genres || [],
+        title: shelfBook.title,
+        author: shelfBook.author,
+        format: shelfBook.format,
+        status: shelfBook.status,
+        currentPage: shelfBook.currentPage,
+        pageCount: shelfBook.pageCount,
+        platform: shelfBook.platform || '',
+        shelfLocation: shelfBook.metadata?.shelfLocation || '',
+        dueDate: shelfBook.metadata?.dueDate ? shelfBook.metadata.dueDate.substring(0, 10) : '',
+        customShelfIds: shelfBook.customShelfIds || [],
+        genres: shelfBook.genres || [],
       });
     }
-  }, [book, editBookForm]);
+  }, [shelfBook, editBookForm]);
+
+  // Reset tab to 'about' if it's a shelf book and activeTab is 'reviews'
+  useEffect(() => {
+    if (isShelfBook && activeTab === 'reviews') {
+      setActiveTab('about');
+    }
+  }, [isShelfBook, activeTab]);
 
   // Note form
   const noteForm = useForm<NoteFormValues>({
@@ -144,13 +178,14 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
 
   if (!book) return null;
 
-  const bookSessions = sessions.filter(s => s.bookId === book.id);
-  const bookNotes = notes.filter(n => n.bookId === book.id);
+  const bookSessions = isShelfBook ? sessions.filter(s => s.bookId === shelfBook.id) : [];
+  const bookNotes = isShelfBook ? notes.filter(n => n.bookId === shelfBook.id) : [];
 
   const handleAddNoteSubmit = async (values: NoteFormValues) => {
+    if (!isShelfBook || !shelfBook) return;
     try {
       await addNoteMutation.mutateAsync({
-        bookId: book.id,
+        bookId: shelfBook.id,
         type: values.type,
         content: values.content,
         pageNumber: values.pageNumber || null,
@@ -170,9 +205,15 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
   };
 
   const handleUpdateBookSubmit = async (values: EditBookFormValues) => {
+    if (!isShelfBook || !shelfBook) return;
     try {
+      if (values.status === 'finished' && shelfBook.status !== 'finished') {
+        setFinishedBookToRate(shelfBook);
+        onClose();
+        return;
+      }
       await updateBookMutation.mutateAsync({
-        id: book.id,
+        id: shelfBook.id,
         updates: {
           title: values.title,
           author: values.author,
@@ -184,7 +225,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
           genres: values.genres,
           platform: values.platform || null,
           metadata: {
-            ...book.metadata,
+            ...shelfBook.metadata,
             shelfLocation: values.format === 'physical' ? values.shelfLocation : undefined,
             dueDate: values.format === 'library' && values.dueDate ? new Date(values.dueDate).toISOString() : undefined
           }
@@ -197,22 +238,23 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
   };
 
   const handleLogPastSessionSubmit = async (values: LogPastFormValues) => {
+    if (!isShelfBook || !shelfBook) return;
     const start = new Date(values.pastDate);
     const end = new Date(start.getTime() + values.pastDuration * 60000);
 
-    const startPage = book.currentPage;
-    const endPage = book.currentPage + values.pastPagesRead;
+    const startPage = shelfBook.currentPage;
+    const endPage = shelfBook.currentPage + values.pastPagesRead;
 
     try {
       await addSessionMutation.mutateAsync({
-        bookId: book.id,
+        bookId: shelfBook.id,
         startTime: start.toISOString(),
         endTime: end.toISOString(),
         durationMinutes: values.pastDuration,
         pagesStart: startPage,
         pagesEnd: endPage,
         pagesRead: values.pastPagesRead,
-        formatUsed: book.format,
+        formatUsed: shelfBook.format,
         location: values.pastLocation,
         moodBefore: 'neutral',
         moodAfter: values.pastMood,
@@ -227,8 +269,44 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
         pastLocation: 'Home',
         pastMood: 'focused',
       });
+
+      if (endPage >= shelfBook.pageCount) {
+        setFinishedBookToRate(shelfBook);
+        onClose();
+      }
     } catch (err: any) {
       alert(err.response?.data?.error || 'Failed to record past session.');
+    }
+  };
+
+  const handleAddToShelf = async (format: 'physical' | 'ebook' | 'audiobook' | 'library') => {
+    try {
+      await addBookMutation.mutateAsync({
+        title: book.title,
+        author: book.author,
+        isbn: book.isbn || null,
+        coverUrl: book.coverUrl || book.cover_url || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=200',
+        format,
+        status: 'to-read',
+        pageCount: book.pageCount || 300,
+        genres: book.genres || [],
+        customShelfIds: [],
+        metadata: {},
+        currentPage: 0,
+      });
+      setShowFormatPicker(false);
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Failed to add book to TBR shelf.');
+    }
+  };
+
+  const handleDeleteReview = async (reviewId: string) => {
+    if (confirm('Are you sure you want to delete your review?')) {
+      try {
+        await deleteReviewMutation.mutateAsync(reviewId);
+      } catch (err: any) {
+        alert(err.response?.data?.error || 'Failed to delete review.');
+      }
     }
   };
 
@@ -251,9 +329,10 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
   };
 
   const handleDelete = async () => {
-    if (confirm(`Are you sure you want to permanently delete "${book.title}"?`)) {
+    if (!isShelfBook || !shelfBook) return;
+    if (confirm(`Are you sure you want to permanently delete "${shelfBook.title}" from your library?`)) {
       try {
-        await deleteBookMutation.mutateAsync(book.id);
+        await deleteBookMutation.mutateAsync(shelfBook.id);
         onClose();
       } catch (err: any) {
         alert(err.response?.data?.error || 'Failed to delete book.');
@@ -261,403 +340,693 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
     }
   };
 
+  // Helper formatter for ratings
+  const formatRatingCount = (count: number) => {
+    if (count < 1000) return `${count} ratings`;
+    if (count < 1000000) return `${(count / 1000).toFixed(1)}K ratings`;
+    return `${(count / 1000000).toFixed(1)}M ratings`;
+  };
+
+  // Render 5-star visual
+  const renderRatingStars = (score: number) => {
+    return Array.from({ length: 5 }).map((_, idx) => {
+      const starNum = idx + 1;
+      const isFilled = score >= starNum;
+      const isHalf = !isFilled && score >= starNum - 0.5;
+      return (
+        <Star 
+          key={idx} 
+          size={14} 
+          fill={isFilled ? 'var(--color-on-hold)' : 'none'} 
+          style={{ color: isFilled || isHalf ? 'var(--color-on-hold)' : 'rgba(255,255,255,0.2)', marginRight: '2px' }} 
+        />
+      );
+    });
+  };
+
+  // Curate colors for reviews source badges
+  const getSourceBadgeStyle = (source: string) => {
+    const defaultStyle = { background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)' };
+    switch (source.toLowerCase()) {
+      case 'goodreads': return { background: 'rgba(16, 185, 129, 0.1)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.2)' };
+      case 'nyt': return { background: 'rgba(245, 158, 11, 0.1)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.2)' };
+      case 'the guardian': return { background: 'rgba(59, 130, 246, 0.1)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.2)' };
+      case 'librarything': return { background: 'rgba(139, 92, 246, 0.1)', color: '#c084fc', border: '1px solid rgba(139, 92, 246, 0.2)' };
+      case 'amazon': return { background: 'rgba(20, 184, 166, 0.1)', color: '#2dd4bf', border: '1px solid rgba(20, 184, 166, 0.2)' };
+      case 'your friends': return { background: 'rgba(99, 102, 241, 0.1)', color: '#818cf8', border: '1px solid rgba(99, 102, 241, 0.2)' };
+      default: return defaultStyle;
+    }
+  };
+
+  // Get similar books mock list
+  const similarBooks = [
+    { title: "Project Hail Mary", author: "Andy Weir", coverUrl: "https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=100", rating: 4.6, reason: "Isolation-based sci-fi" },
+    { title: "Dune", author: "Frank Herbert", coverUrl: "https://images.unsplash.com/photo-1541963463532-d68292c34b19?w=100", rating: 4.5, reason: "Epic classics" },
+    { title: "The Alchemist", author: "Paulo Coelho", coverUrl: "https://images.unsplash.com/photo-1544947950-fa07a98d237f?w=100", rating: 4.3, reason: "Philosophical fiction" }
+  ];
+
   const editFormatType = editBookForm.watch('format');
   const editBookShelves = editBookForm.watch('customShelfIds') || [];
   const editBookGenres = editBookForm.watch('genres') || [];
   const noteIsFavorite = noteForm.watch('isFavorite');
 
+  // Aggregated reviews statistics
+  const reviewsAggregate = reviewsResponse?.aggregate;
+  const aggregateScore = reviewsAggregate ? parseFloat(reviewsAggregate.weightedAvgScore) : (book.external_avg_rating || 4.2);
+  const totalRatingCount = reviewsAggregate ? reviewsAggregate.totalRatingCount : (book.external_rating_count || 1500);
+
+  // Check if "Your friends" has reviews
+  const friendReviews = reviewsResponse?.reviews.filter(r => r.source === 'Your friends') || [];
+  const hasFriendReviews = friendReviews.length > 0;
+
   return (
     <div className="modal-overlay" style={{ zIndex: 2100 }}>
-      <div className="modal-content glass animate-fade-in" style={{ maxWidth: '750px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+      <div className="modal-content glass animate-fade-in" style={{ maxWidth: '750px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', position: 'relative' }}>
         <button className="modal-close" onClick={onClose}>
           <X size={18} />
         </button>
 
-        {/* Header Summary */}
-        <div style={{ display: 'flex', gap: '1.5rem', borderBottom: '1px solid var(--border-glass)', paddingBottom: '1.25rem' }}>
+        {/* Persistent Book Header */}
+        <div style={{ display: 'flex', gap: '1.5rem', borderBottom: '1px solid var(--border-glass)', paddingBottom: '1.25rem', position: 'relative' }}>
           <img 
-            src={book.coverUrl || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=100'} 
+            src={book.coverUrl || book.cover_url || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=100'} 
             alt={book.title} 
             style={{ width: '80px', height: '120px', borderRadius: '6px', objectFit: 'cover' }} 
             onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=100' }}
           />
-          <div>
-            <h2 style={{ fontSize: '1.4rem', fontWeight: 800, fontFamily: 'var(--font-display)', margin: 0 }}>{book.title}</h2>
+          <div style={{ flexGrow: 1, minWidth: 0 }}>
+            <h2 style={{ fontSize: '1.4rem', fontWeight: 800, fontFamily: 'var(--font-display)', margin: 0, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+              {book.title}
+            </h2>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '0.25rem' }}>by {book.author}</p>
             
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
-              <span className={`badge-format ${book.format}`}>{book.format.toUpperCase()}</span>
-              <span style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}>
-                Progress: {book.status === 'finished' ? '100.00' : book.progressPercentage}% ({book.status === 'finished' ? book.pageCount : book.currentPage}/{book.pageCount} pages)
+            {/* Aggregated Score Badge row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+              <span style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                {aggregateScore.toFixed(1)}
               </span>
+              <div style={{ display: 'flex' }}>
+                {renderRatingStars(aggregateScore)}
+              </div>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                ({formatRatingCount(totalRatingCount)})
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              {isShelfBook ? (
+                <>
+                  <span className={`badge-format ${shelfBook.format}`}>{shelfBook.format.toUpperCase()}</span>
+                  <span style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}>
+                    Progress: {shelfBook.status === 'finished' ? '100.00' : shelfBook.progressPercentage}% ({shelfBook.status === 'finished' ? shelfBook.pageCount : shelfBook.currentPage}/{shelfBook.pageCount} pages)
+                  </span>
+                  <span style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.1)', color: 'var(--color-finished)', fontWeight: 600 }}>
+                    On your shelf
+                  </span>
+                </>
+              ) : (
+                <div style={{ position: 'relative' }}>
+                  <button 
+                    className="btn btn-primary" 
+                    style={{ padding: '0.35rem 0.8rem', fontSize: '0.75rem', color: '#091A1E', fontWeight: 700 }}
+                    onClick={() => setShowFormatPicker(!showFormatPicker)}
+                  >
+                    + Add to shelf
+                  </button>
+                  {showFormatPicker && (
+                    <div 
+                      className="glass" 
+                      style={{ 
+                        position: 'absolute', 
+                        top: '100%', 
+                        left: 0, 
+                        marginTop: '0.5rem', 
+                        display: 'flex', 
+                        flexDirection: 'column', 
+                        gap: '0.25rem', 
+                        padding: '0.5rem', 
+                        zIndex: 100, 
+                        width: '130px', 
+                        boxShadow: '0 5px 15px rgba(0,0,0,0.5)' 
+                      }}
+                    >
+                      {(['physical', 'ebook', 'audiobook', 'library'] as const).map(fmt => (
+                        <button 
+                          key={fmt} 
+                          className="btn btn-text" 
+                          style={{ padding: '0.3rem', fontSize: '0.72rem', textAlign: 'left', width: '100%' }}
+                          onClick={() => handleAddToShelf(fmt)}
+                        >
+                          {fmt.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Nav Tabs */}
+        {/* Restructured Main Tabs */}
         <div style={{ display: 'flex', borderBottom: '1px solid var(--border-glass)', marginTop: '1rem', gap: '1.5rem' }}>
           <button 
-            className={`btn-text ${activeTab === 'notes' ? 'active' : ''}`}
-            onClick={() => setActiveTab('notes')}
-            style={{ borderBottom: activeTab === 'notes' ? '2px solid var(--accent-primary)' : 'none', borderRadius: 0, padding: '0.75rem 0', fontWeight: 600 }}
+            className={`btn-text ${activeTab === 'about' ? 'active' : ''}`}
+            onClick={() => setActiveTab('about')}
+            style={{ borderBottom: activeTab === 'about' ? '2px solid var(--accent-primary)' : 'none', borderRadius: 0, padding: '0.75rem 0', fontWeight: 600 }}
           >
-            Notes & Quotes ({bookNotes.length})
+            About
           </button>
+          {!isShelfBook && (
+            <button 
+              className={`btn-text ${activeTab === 'reviews' ? 'active' : ''}`}
+              onClick={() => setActiveTab('reviews')}
+              style={{ borderBottom: activeTab === 'reviews' ? '2px solid var(--accent-primary)' : 'none', borderRadius: 0, padding: '0.75rem 0', fontWeight: 600 }}
+            >
+              Reviews ({totalRatingCount > 1000 ? 'Curated' : reviewsResponse?.reviews.length || 0})
+            </button>
+          )}
           <button 
-            className={`btn-text ${activeTab === 'sessions' ? 'active' : ''}`}
-            onClick={() => setActiveTab('sessions')}
-            style={{ borderBottom: activeTab === 'sessions' ? '2px solid var(--accent-primary)' : 'none', borderRadius: 0, padding: '0.75rem 0', fontWeight: 600 }}
+            className={`btn-text ${activeTab === 'similar' ? 'active' : ''}`}
+            onClick={() => setActiveTab('similar')}
+            style={{ borderBottom: activeTab === 'similar' ? '2px solid var(--accent-primary)' : 'none', borderRadius: 0, padding: '0.75rem 0', fontWeight: 600 }}
           >
-            History & Sessions ({bookSessions.length})
-          </button>
-          <button 
-            className={`btn-text ${activeTab === 'edit' ? 'active' : ''}`}
-            onClick={() => setActiveTab('edit')}
-            style={{ borderBottom: activeTab === 'edit' ? '2px solid var(--accent-primary)' : 'none', borderRadius: 0, padding: '0.75rem 0', fontWeight: 600 }}
-          >
-            Manage Book
+            Similar Books
           </button>
         </div>
 
         {/* Tab Contents */}
-        <div style={{ flexGrow: 1, overflowY: 'auto', padding: '1.25rem 0', maxHeight: '45vh' }}>
+        <div style={{ flexGrow: 1, overflowY: 'auto', padding: '1.25rem 0', maxHeight: '55vh' }}>
           
-          {/* Notes Tab */}
-          {activeTab === 'notes' && (
+          {/* ABOUT TAB */}
+          {activeTab === 'about' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-              {/* Add Note Form */}
-              <form onSubmit={noteForm.handleSubmit(handleAddNoteSubmit)} className="glass" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', background: 'rgba(255,255,255,0.02)' }}>
-                <h4 style={{ fontSize: '0.9rem', fontWeight: 700 }}>Capture a new moment (Rich Text Note)</h4>
-                
-                <Controller
-                  name="content"
-                  control={noteForm.control}
-                  render={({ field }) => (
-                    <Editor
-                      value={field.value}
-                      onChange={field.onChange}
-                      placeholder={noteForm.watch('type') === 'quote' ? "Paste or write the quote..." : "What are you thinking?"}
-                    />
-                  )}
-                />
-                {noteForm.formState.errors.content && <span style={{ color: 'var(--color-dnf)', fontSize: '0.75rem' }}>{noteForm.formState.errors.content.message}</span>}
+              <div>
+                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.5rem' }}>Description</h3>
+                <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                  {book.description || 'No description available for this book.'}
+                </p>
+              </div>
 
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
-                  <select 
-                    className="form-select" 
-                    style={{ width: '130px', padding: '0.45rem' }}
-                    {...noteForm.register('type')}
-                  >
-                    <option value="note">Text Note</option>
-                    <option value="quote">Quote</option>
-                    <option value="bookmark">Bookmark</option>
-                  </select>
-                  
-                  <input 
-                    type="number" 
-                    className="form-input" 
-                    style={{ width: '90px', padding: '0.45rem' }} 
-                    placeholder="Page"
-                    {...noteForm.register('pageNumber', { valueAsNumber: true })}
-                  />
-
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    style={{ flexGrow: 1, minWidth: '150px', padding: '0.45rem' }} 
-                    placeholder="Tags (comma separated)"
-                    {...noteForm.register('tags')}
-                  />
-
-                  <button 
-                    type="button"
-                    onClick={() => noteForm.setValue('isFavorite', !noteIsFavorite)}
-                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: noteIsFavorite ? 'var(--color-on-hold)' : 'var(--text-muted)' }}
-                    title="Toggle Favorite"
-                  >
-                    <Star size={20} fill={noteIsFavorite ? 'currentColor' : 'none'} />
-                  </button>
-
-                  <button type="submit" className="btn btn-primary" style={{ padding: '0.45rem 1rem', color: '#091A1E', fontWeight: 700 }} disabled={addNoteMutation.isPending}>
-                    {addNoteMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <Plus size={14} />} Add
-                  </button>
+              {/* Book Metadata Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem', padding: '1rem', background: 'rgba(255,255,255,0.01)', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
+                <div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Publisher</div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)', marginTop: '0.2rem' }}>{book.publisher || 'Unknown'}</div>
                 </div>
-              </form>
+                {book.publishedDate && (
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Published Date</div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)', marginTop: '0.2rem' }}>
+                      {format(new Date(book.publishedDate), 'MMMM dd, yyyy')}
+                    </div>
+                  </div>
+                )}
+                {book.pageCount && (
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Length</div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)', marginTop: '0.2rem' }}>{book.pageCount} pages</div>
+                  </div>
+                )}
+                {book.isbn && (
+                  <div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>ISBN-13</div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)', marginTop: '0.2rem' }}>{book.isbn}</div>
+                  </div>
+                )}
+              </div>
 
-              {/* Notes List */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                {bookNotes.length === 0 ? (
-                  <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '0.9rem', padding: '1rem' }}>No notes written yet. Start capturing!</p>
-                ) : (
-                  bookNotes.map((note) => (
-                    <div key={note.id} className="glass" style={{ padding: '1rem', borderLeft: note.type === 'quote' ? '3px solid var(--accent-primary)' : '1px solid var(--border-glass)' }}>
-                      <div className="flex-between" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
-                        <span style={{ textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.02em', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                          {note.isFavorite && <Star size={10} fill="var(--color-on-hold)" style={{ color: 'var(--color-on-hold)' }} />}
-                          {note.type} {note.pageNumber && `• Page ${note.pageNumber}`}
-                        </span>
-                        <span>{format(new Date(note.createdAt), 'MMM dd, yyyy')}</span>
+              {/* If Shelf Book: Show reading progress + Collapsible Notes/Sessions/Manage panels */}
+              {isShelfBook && shelfBook && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', borderTop: '1px solid var(--border-glass)', paddingTop: '1.25rem' }}>
+                  
+                  {/* Progress panel */}
+                  <div className="glass" style={{ padding: '1rem' }}>
+                    <div className="flex-between" onClick={() => setShowProgressSection(!showProgressSection)} style={{ cursor: 'pointer' }}>
+                      <h4 style={{ fontSize: '0.9rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Clock size={14} style={{ color: 'var(--accent-primary)' }} />
+                        Your Shelf Progress
+                      </h4>
+                      {showProgressSection ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </div>
+                    {showProgressSection && (
+                      <div style={{ marginTop: '0.75rem' }}>
+                        <div className="flex-between" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
+                          <span>Page {shelfBook.currentPage} of {shelfBook.pageCount}</span>
+                          <span>{shelfBook.progressPercentage}%</span>
+                        </div>
+                        <div className="progress-bar-container" style={{ height: '6px' }}>
+                          <div className="progress-bar-fill" style={{ width: `${shelfBook.progressPercentage}%` }}></div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '1rem', marginTop: '0.75rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {shelfBook.dateStarted && <span>Started: {format(new Date(shelfBook.dateStarted), 'MMM dd, yyyy')}</span>}
+                          {shelfBook.dateFinished && <span>Finished: {format(new Date(shelfBook.dateFinished), 'MMM dd, yyyy')}</span>}
+                        </div>
                       </div>
-                      
-                      <div 
-                        style={{ 
-                          fontSize: '0.9rem', 
-                          fontStyle: note.type === 'quote' ? 'italic' : 'normal',
-                          lineHeight: 1.5,
-                          color: note.type === 'quote' ? 'var(--text-primary)' : 'var(--text-secondary)'
-                        }}
-                        dangerouslySetInnerHTML={{ __html: note.content }}
-                      />
+                    )}
+                  </div>
 
-                      {note.tags.length > 0 && (
-                        <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.5rem' }}>
-                          {note.tags.map(t => (
-                            <span key={t} style={{ fontSize: '0.7rem', padding: '0.1rem 0.35rem', borderRadius: '4px', background: 'rgba(255,255,255,0.04)', color: 'var(--text-muted)' }}>
-                              #{t}
-                            </span>
+                  {/* Notes Collapsible Section */}
+                  <div className="glass" style={{ padding: '1rem' }}>
+                    <div className="flex-between" onClick={() => setShowNotesSection(!showNotesSection)} style={{ cursor: 'pointer' }}>
+                      <h4 style={{ fontSize: '0.9rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Bookmark size={14} style={{ color: 'var(--color-on-hold)' }} />
+                        Notes & Quotes ({bookNotes.length})
+                      </h4>
+                      {showNotesSection ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </div>
+                    {showNotesSection && (
+                      <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        {/* Rich Text Note Form */}
+                        <form onSubmit={noteForm.handleSubmit(handleAddNoteSubmit)} className="glass" style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', background: 'rgba(255,255,255,0.01)' }}>
+                          <Controller
+                            name="content"
+                            control={noteForm.control}
+                            render={({ field }) => (
+                              <Editor
+                                value={field.value}
+                                onChange={field.onChange}
+                                placeholder="Write a note or quote..."
+                              />
+                            )}
+                          />
+                          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <select className="form-select" style={{ width: '110px', padding: '0.35rem' }} {...noteForm.register('type')}>
+                              <option value="note">Note</option>
+                              <option value="quote">Quote</option>
+                              <option value="bookmark">Bookmark</option>
+                            </select>
+                            <input type="number" className="form-input" style={{ width: '70px', padding: '0.35rem' }} placeholder="Page" {...noteForm.register('pageNumber', { valueAsNumber: true })} />
+                            <input type="text" className="form-input" style={{ flexGrow: 1, padding: '0.35rem' }} placeholder="Tags..." {...noteForm.register('tags')} />
+                            <button type="submit" className="btn btn-primary" style={{ padding: '0.35rem 0.75rem', color: '#091A1E', fontWeight: 700 }}>Add</button>
+                          </div>
+                        </form>
+                        {/* Notes list */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                          {bookNotes.map(n => (
+                            <div key={n.id} className="glass" style={{ padding: '0.75rem', fontSize: '0.85rem' }}>
+                              <div className="flex-between" style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
+                                <span style={{ color: 'var(--accent-primary)', textTransform: 'uppercase' }}>{n.type} {n.pageNumber && `• p. ${n.pageNumber}`}</span>
+                                <span>{format(new Date(n.createdAt), 'MMM dd, yyyy')}</span>
+                              </div>
+                              <div dangerouslySetInnerHTML={{ __html: n.content }} />
+                            </div>
                           ))}
                         </div>
-                      )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Reading History Collapsible Section */}
+                  <div className="glass" style={{ padding: '1rem' }}>
+                    <div className="flex-between" onClick={() => setShowSessionsSection(!showSessionsSection)} style={{ cursor: 'pointer' }}>
+                      <h4 style={{ fontSize: '0.9rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Clock size={14} style={{ color: 'var(--color-reading)' }} />
+                        Reading Sessions ({bookSessions.length})
+                      </h4>
+                      {showSessionsSection ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                     </div>
-                  ))
-                )}
-              </div>
+                    {showSessionsSection && (
+                      <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        <button className="btn btn-secondary" style={{ width: 'fit-content', padding: '0.35rem 0.75rem', fontSize: '0.75rem' }} onClick={() => setShowLogPast(!showLogPast)}>
+                          {showLogPast ? 'Cancel' : 'Log Past Session'}
+                        </button>
+                        {showLogPast && (
+                          <form onSubmit={logPastForm.handleSubmit(handleLogPastSessionSubmit)} className="glass" style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem' }}>
+                              <input type="date" className="form-input" style={{ padding: '0.35rem' }} {...logPastForm.register('pastDate')} />
+                              <input type="number" className="form-input" style={{ padding: '0.35rem' }} placeholder="Min" {...logPastForm.register('pastDuration', { valueAsNumber: true })} />
+                              <input type="number" className="form-input" style={{ padding: '0.35rem' }} placeholder="Pages" {...logPastForm.register('pastPagesRead', { valueAsNumber: true })} />
+                            </div>
+                            <button type="submit" className="btn btn-primary" style={{ padding: '0.35rem', color: '#091A1E', fontWeight: 700 }}>Save Log</button>
+                          </form>
+                        )}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                          {bookSessions.map(s => (
+                            <div key={s.id} className="glass" style={{ padding: '0.75rem', display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                              <div>
+                                <span style={{ fontWeight: 700 }}>{s.pagesRead} pages read</span> in {s.durationMinutes} min
+                              </div>
+                              <span style={{ color: 'var(--text-muted)' }}>{format(new Date(s.startTime), 'MMM dd, yyyy')}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Edit/Delete settings collapsible */}
+                  <div className="glass" style={{ padding: '1rem' }}>
+                    <div className="flex-between" onClick={() => setShowEditSection(!showEditSection)} style={{ cursor: 'pointer' }}>
+                      <h4 style={{ fontSize: '0.9rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Info size={14} style={{ color: 'var(--text-muted)' }} />
+                        Edit Shelf Configuration
+                      </h4>
+                      {showEditSection ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </div>
+                    {showEditSection && (
+                      <form onSubmit={editBookForm.handleSubmit(handleUpdateBookSubmit)} style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                          <input type="text" className="form-input" {...editBookForm.register('title')} placeholder="Title" />
+                          <input type="text" className="form-input" {...editBookForm.register('author')} placeholder="Author" />
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                          <select className="form-select" {...editBookForm.register('format')}>
+                            <option value="physical">Physical</option>
+                            <option value="ebook">Ebook</option>
+                            <option value="audiobook">Audiobook</option>
+                            <option value="library">Library</option>
+                          </select>
+                          <select className="form-select" {...editBookForm.register('status')}>
+                            <option value="to-read">TBR</option>
+                            <option value="reading">Reading</option>
+                            <option value="finished">Finished</option>
+                          </select>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border-glass)', paddingTop: '0.75rem' }}>
+                          <button type="button" className="btn btn-secondary" style={{ color: 'var(--color-dnf)', borderColor: 'rgba(239,68,68,0.2)' }} onClick={handleDelete}>
+                            <Trash2 size={12} /> Delete Book
+                          </button>
+                          <button type="submit" className="btn btn-primary" style={{ color: '#091A1E', fontWeight: 700 }}>Save Changes</button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+
+                </div>
+              )}
             </div>
           )}
 
-          {/* Sessions Tab */}
-          {activeTab === 'sessions' && (
+          {/* REVIEWS TAB (COMPONENT A) */}
+          {activeTab === 'reviews' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              <div className="flex-between">
-                <h4 style={{ fontSize: '1rem' }}>Reading History</h4>
-                <button 
-                  className="btn btn-secondary" 
-                  style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
-                  onClick={() => setShowLogPast(!showLogPast)}
+              
+              {/* Write/Edit Your Review Bar */}
+              {reviewsResponse && (
+                <div 
+                  className="glass" 
+                  style={{ 
+                    padding: '0.75rem 1rem', 
+                    background: 'rgba(139, 92, 246, 0.03)', 
+                    border: '1px solid rgba(139, 92, 246, 0.15)',
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center', 
+                    fontSize: '0.85rem' 
+                  }}
                 >
-                  {showLogPast ? 'Cancel' : 'Log Past Session'}
-                </button>
-              </div>
-
-              {/* Log Past Form */}
-              {showLogPast && (
-                <form onSubmit={logPastForm.handleSubmit(handleLogPastSessionSubmit)} className="glass" style={{ padding: '1rem', background: 'rgba(255,255,255,0.02)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  <h5 style={{ fontWeight: 700, fontSize: '0.85rem' }}>Log a past session</h5>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Date</label>
-                      <input type="date" className="form-input" style={{ padding: '0.4rem' }} {...logPastForm.register('pastDate')} />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Duration (min)</label>
-                      <input type="number" className="form-input" style={{ padding: '0.4rem' }} {...logPastForm.register('pastDuration', { valueAsNumber: true })} />
-                      {logPastForm.formState.errors.pastDuration && <span style={{ color: 'var(--color-dnf)', fontSize: '0.7rem' }}>{logPastForm.formState.errors.pastDuration.message}</span>}
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Pages Read</label>
-                      <input type="number" className="form-input" style={{ padding: '0.4rem' }} {...logPastForm.register('pastPagesRead', { valueAsNumber: true })} />
-                      {logPastForm.formState.errors.pastPagesRead && <span style={{ color: 'var(--color-dnf)', fontSize: '0.7rem' }}>{logPastForm.formState.errors.pastPagesRead.message}</span>}
-                    </div>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Location</label>
-                      <input type="text" className="form-input" style={{ padding: '0.4rem' }} {...logPastForm.register('pastLocation')} />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Mood After</label>
-                      <select className="form-select" style={{ padding: '0.4rem' }} {...logPastForm.register('pastMood')}>
-                        <option value="focused">Focused</option>
-                        <option value="inspired">Inspired</option>
-                        <option value="relaxed">Relaxed</option>
-                        <option value="tired">Tired</option>
-                        <option value="neutral">Neutral</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.25rem' }}>
-                    <button type="submit" className="btn btn-primary" style={{ padding: '0.45rem 1rem', fontSize: '0.8rem', color: '#091A1E', fontWeight: 700 }} disabled={addSessionMutation.isPending}>
-                      {addSessionMutation.isPending ? 'Saving...' : 'Save Log'}
-                    </button>
-                  </div>
-                </form>
+                  {reviewsResponse.user_review ? (
+                    <>
+                      <span>
+                        Your rating: <strong>{reviewsResponse.user_review.starRating} Stars</strong>
+                        {reviewsResponse.user_review.isShared && ' (Shared)'}
+                      </span>
+                      <div style={{ display: 'flex', gap: '0.75rem' }}>
+                        <button 
+                          className="btn btn-text" 
+                          style={{ padding: 0, fontWeight: 700, color: 'var(--accent-primary)' }}
+                          onClick={() => setFinishedBookToRate(shelfBook)}
+                        >
+                          Edit your review
+                        </button>
+                        <button 
+                          className="btn btn-text" 
+                          style={{ padding: 0, color: 'var(--color-dnf)', fontSize: '0.8rem' }}
+                          onClick={() => handleDeleteReview(reviewsResponse.user_review!.id)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <span>You haven't reviewed this book yet.</span>
+                      {isShelfBook && shelfBook?.status === 'finished' ? (
+                        <button 
+                          className="btn btn-text animate-pulse-glow" 
+                          style={{ padding: 0, fontWeight: 700, color: 'var(--accent-primary)' }}
+                          onClick={() => setFinishedBookToRate(shelfBook)}
+                        >
+                          Write a review
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Finish book to review it</span>
+                      )}
+                    </>
+                  )}
+                </div>
               )}
 
-              {/* Sessions List */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                {bookSessions.length === 0 ? (
-                  <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '0.9rem', padding: '1rem' }}>No logged reading sessions yet.</p>
-                ) : (
-                  bookSessions.map((session) => (
-                    <div key={session.id} className="glass" style={{ padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                          <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>Read {session.pagesRead} pages / min</span>
-                          <span style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', color: 'var(--text-secondary)' }}>
-                            p. {session.pagesStart} - {session.pagesEnd}
-                          </span>
-                        </div>
-                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'flex', gap: '0.5rem' }}>
-                          <span>⏱️ {session.durationMinutes} min</span>
-                          <span>📍 {session.location}</span>
-                          <span>😊 {session.moodAfter}</span>
-                        </p>
-                      </div>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textAlign: 'right' }}>
-                        <div>{format(new Date(session.startTime), 'MMM dd, yyyy')}</div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
-                          {format(new Date(session.startTime), 'h:mm a')}
-                        </div>
-                      </div>
+              {/* Sentiment Summary Bar (Component A2) */}
+              <div className="glass" style={{ padding: '0.85rem 1rem', background: 'rgba(255,255,255,0.01)' }}>
+                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
+                  Reader sentiment across all sources
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem' }}>
+                    <span style={{ width: '50px', color: 'var(--text-muted)' }}>Positive</span>
+                    <div style={{ flexGrow: 1, height: '5px', background: 'rgba(255,255,255,0.03)', borderRadius: '3px', overflow: 'hidden' }}>
+                      <div style={{ width: `${reviewsResponse?.sentiment.positive || 72}%`, height: '100%', background: '#10b981' }}></div>
                     </div>
-                  ))
+                    <span style={{ width: '30px', textAlign: 'right', fontWeight: 600 }}>{reviewsResponse?.sentiment.positive || 72}%</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem' }}>
+                    <span style={{ width: '50px', color: 'var(--text-muted)' }}>Neutral</span>
+                    <div style={{ flexGrow: 1, height: '5px', background: 'rgba(255,255,255,0.03)', borderRadius: '3px', overflow: 'hidden' }}>
+                      <div style={{ width: `${reviewsResponse?.sentiment.neutral || 18}%`, height: '100%', background: '#6b7280' }}></div>
+                    </div>
+                    <span style={{ width: '30px', textAlign: 'right', fontWeight: 600 }}>{reviewsResponse?.sentiment.neutral || 18}%</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem' }}>
+                    <span style={{ width: '50px', color: 'var(--text-muted)' }}>Critical</span>
+                    <div style={{ flexGrow: 1, height: '5px', background: 'rgba(255,255,255,0.03)', borderRadius: '3px', overflow: 'hidden' }}>
+                      <div style={{ width: `${reviewsResponse?.sentiment.critical || 10}%`, height: '100%', background: '#ef4444' }}></div>
+                    </div>
+                    <span style={{ width: '30px', textAlign: 'right', fontWeight: 600 }}>{reviewsResponse?.sentiment.critical || 10}%</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Source Filter Tabs (Component A3) */}
+              <div style={{ overflowX: 'auto', display: 'flex', gap: '0.5rem', paddingBottom: '0.25rem', scrollbarWidth: 'none' }}>
+                {['All', 'Goodreads', 'NYT', 'The Guardian', 'LibraryThing', 'Amazon', ...(hasFriendReviews ? ['Your friends'] : [])].map(src => {
+                  const isActive = selectedSource === src;
+                  return (
+                    <button
+                      key={src}
+                      type="button"
+                      onClick={() => setSelectedSource(src)}
+                      style={{
+                        padding: '0.4rem 0.8rem',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        borderRadius: '16px',
+                        border: '1px solid',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                        backgroundColor: isActive ? 'rgba(212, 178, 111, 0.12)' : 'rgba(255,255,255,0.01)',
+                        borderColor: isActive ? 'var(--accent-primary)' : 'var(--border-glass)',
+                        color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      {src}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Loader or Reviews List (Component A4) */}
+              {isReviewsLoading || (reviewsResponse?.status === 'fetching') ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '120px', gap: '0.5rem', color: 'var(--text-secondary)' }}>
+                  <Loader2 className="animate-spin" size={24} style={{ color: 'var(--accent-primary)' }} />
+                  <span style={{ fontSize: '0.85rem' }}>Fetching reviews across sources...</span>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {reviewsResponse?.reviews.length === 0 ? (
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '1rem' }}>No reviews found for this filter.</p>
+                  ) : (
+                    reviewsResponse?.reviews.map((rev) => (
+                      <div 
+                        key={rev.id} 
+                        className="glass" 
+                        style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', background: 'rgba(255,255,255,0.01)' }}
+                      >
+                        <div className="flex-between">
+                          <span 
+                            style={{ 
+                              fontSize: '0.65rem', 
+                              padding: '0.15rem 0.5rem', 
+                              borderRadius: '12px', 
+                              fontWeight: 700,
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.03em',
+                              ...getSourceBadgeStyle(rev.source)
+                            }}
+                          >
+                            {rev.source}
+                          </span>
+                          
+                          {rev.starRating && (
+                            <div style={{ display: 'flex' }}>
+                              {renderRatingStars(rev.starRating)}
+                            </div>
+                          )}
+                        </div>
+
+                        <p style={{ fontSize: '0.88rem', color: 'var(--text-primary)', lineHeight: 1.4 }}>
+                          {rev.excerpt}
+                          {rev.excerpt.length > 150 && (
+                            <button
+                              className="btn-text"
+                              style={{ marginLeft: '4px', fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-primary)', padding: 0 }}
+                              onClick={() => setSelectedFullReview(rev)}
+                            >
+                              Read more
+                            </button>
+                          )}
+                        </p>
+
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                          {rev.reviewerType === 'community' 
+                            ? `Verified reader · ${rev.helpfulVotes || 0} helpful votes` 
+                            : `${rev.source.toUpperCase()} Critic Review`
+                          }
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {/* Rating Distribution (Component A5) */}
+              <div style={{ marginTop: '0.5rem', borderTop: '1px solid var(--border-glass)', paddingTop: '0.75rem' }}>
+                <button 
+                  className="btn btn-text"
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', padding: 0, fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}
+                  onClick={() => setIsBreakdownExpanded(!isBreakdownExpanded)}
+                >
+                  {isBreakdownExpanded ? 'Hide rating breakdown' : 'See rating breakdown'}
+                  <ChevronDown size={12} style={{ transform: isBreakdownExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                </button>
+                
+                {isBreakdownExpanded && (
+                  <div 
+                    className="glass"
+                    style={{ 
+                      marginTop: '0.75rem',
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '0.4rem', 
+                      padding: '0.85rem 1rem', 
+                      background: 'rgba(255,255,255,0.01)' 
+                    }}
+                  >
+                    {Object.entries(reviewsAggregate?.ratingDistribution || {5: 54, 4: 32, 3: 9, 2: 3, 1: 2})
+                      .sort((a, b) => parseInt(b[0]) - parseInt(a[0]))
+                      .map(([stars, pct]) => (
+                        <div key={stars} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem' }}>
+                          <span style={{ width: '45px', color: 'var(--text-secondary)' }}>{stars} stars</span>
+                          <div style={{ flexGrow: 1, height: '6px', background: 'rgba(255,255,255,0.03)', borderRadius: '3px', overflow: 'hidden' }}>
+                            <div style={{ width: `${pct}%`, height: '100%', background: 'var(--color-on-hold)' }}></div>
+                          </div>
+                          <span style={{ width: '25px', textAlign: 'right', fontWeight: 600 }}>{pct}%</span>
+                        </div>
+                      ))}
+                  </div>
                 )}
               </div>
+
             </div>
           )}
 
-          {/* Manage Tab */}
-          {activeTab === 'edit' && (
-            <form onSubmit={editBookForm.handleSubmit(handleUpdateBookSubmit)} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Title</label>
-                  <input type="text" className="form-input" {...editBookForm.register('title')} />
-                  {editBookForm.formState.errors.title && <span style={{ color: 'var(--color-dnf)', fontSize: '0.75rem' }}>{editBookForm.formState.errors.title.message}</span>}
+          {/* SIMILAR BOOKS TAB */}
+          {activeTab === 'similar' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '0.25rem' }}>Recommendations based on genres</h3>
+              {similarBooks.map((b, idx) => (
+                <div key={idx} className="glass" style={{ padding: '0.75rem 1rem', display: 'flex', alignItems: 'center', gap: '1rem', background: 'rgba(255,255,255,0.01)' }}>
+                  <img src={b.coverUrl} style={{ width: '32px', height: '48px', objectFit: 'cover', borderRadius: '3px' }} alt={b.title} />
+                  <div style={{ flexGrow: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.title}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>by {b.author} • {b.reason}</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', flexShrink: 0 }}>
+                    <Star size={12} fill="var(--color-on-hold)" style={{ color: 'var(--color-on-hold)' }} />
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>{b.rating}</span>
+                  </div>
                 </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Author</label>
-                  <input type="text" className="form-input" {...editBookForm.register('author')} />
-                  {editBookForm.formState.errors.author && <span style={{ color: 'var(--color-dnf)', fontSize: '0.75rem' }}>{editBookForm.formState.errors.author.message}</span>}
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Format</label>
-                  <select className="form-select" {...editBookForm.register('format')}>
-                    <option value="physical">Physical Book</option>
-                    <option value="ebook">Ebook</option>
-                    <option value="audiobook">Audiobook</option>
-                    <option value="library">Library Loan</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Reading Status</label>
-                  <select className="form-select" {...editBookForm.register('status')}>
-                    <option value="to-read">To Read (TBR)</option>
-                    <option value="reading">Currently Reading</option>
-                    <option value="finished">Finished</option>
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Current Page / Minutes</label>
-                  <input type="number" className="form-input" {...editBookForm.register('currentPage', { valueAsNumber: true })} />
-                  {editBookForm.formState.errors.currentPage && <span style={{ color: 'var(--color-dnf)', fontSize: '0.75rem' }}>{editBookForm.formState.errors.currentPage.message}</span>}
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Total Pages / Minutes</label>
-                  <input type="number" className="form-input" {...editBookForm.register('pageCount', { valueAsNumber: true })} />
-                  {editBookForm.formState.errors.pageCount && <span style={{ color: 'var(--color-dnf)', fontSize: '0.75rem' }}>{editBookForm.formState.errors.pageCount.message}</span>}
-                </div>
-              </div>
-
-              {editFormatType === 'physical' && (
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Shelf Location (e.g. Living Room Shelf A)</label>
-                  <input type="text" className="form-input" placeholder="Living Room Shelf A" {...editBookForm.register('shelfLocation')} />
-                </div>
-              )}
-
-              {editFormatType === 'library' && (
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Due Date</label>
-                  <input type="date" className="form-input" {...editBookForm.register('dueDate')} />
-                </div>
-              )}
-
-              {/* Genre Checkboxes */}
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Genres / Categories</label>
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-                  {PRIMARY_GENRES.map(g => {
-                    const isSelected = editBookGenres.map(x => x.toLowerCase()).includes(g.toLowerCase());
-                    return (
-                      <button
-                        key={g}
-                        type="button"
-                        onClick={() => toggleGenreSelection(g)}
-                        style={{
-                          padding: '0.4rem 0.75rem',
-                          fontSize: '0.75rem',
-                          borderRadius: 'var(--radius-sm)',
-                          border: '1px solid',
-                          cursor: 'pointer',
-                          backgroundColor: isSelected ? 'rgba(212, 178, 111, 0.12)' : 'transparent',
-                          borderColor: isSelected ? 'var(--accent-primary)' : 'var(--border-glass)',
-                          color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
-                          transition: 'all 0.2s ease',
-                          textTransform: 'capitalize'
-                        }}
-                      >
-                        {g}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Collections Checkboxes */}
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Collections / Shelves</label>
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  {shelves.map(shelf => {
-                    const isSelected = editBookShelves.includes(shelf.id);
-                    return (
-                      <button
-                        key={shelf.id}
-                        type="button"
-                        onClick={() => toggleShelfSelection(shelf.id)}
-                        style={{
-                          padding: '0.4rem 0.75rem',
-                          fontSize: '0.75rem',
-                          borderRadius: 'var(--radius-sm)',
-                          border: '1px solid',
-                          cursor: 'pointer',
-                          backgroundColor: isSelected ? `${shelf.color}25` : 'transparent',
-                          borderColor: isSelected ? shelf.color : 'var(--border-glass)',
-                          color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
-                          transition: 'all 0.2s ease'
-                        }}
-                      >
-                        {shelf.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border-glass)', paddingTop: '1.25rem', marginTop: '1rem' }}>
-                <button 
-                  type="button" 
-                  className="btn btn-secondary" 
-                  style={{ color: 'var(--color-dnf)', borderColor: 'rgba(239, 68, 68, 0.2)', display: 'flex', gap: '0.25rem', alignItems: 'center' }}
-                  onClick={handleDelete}
-                  disabled={deleteBookMutation.isPending}
-                >
-                  {deleteBookMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Delete Book
-                </button>
-                <button type="submit" className="btn btn-primary" style={{ color: '#091A1E', fontWeight: 700 }} disabled={updateBookMutation.isPending}>
-                  {updateBookMutation.isPending ? 'Saving...' : 'Save Changes'}
-                </button>
-              </div>
-            </form>
+              ))}
+            </div>
           )}
 
         </div>
+
+        {/* Read More Bottom Sheet Overlay */}
+        {selectedFullReview && (
+          <div 
+            className="modal-overlay" 
+            style={{ zIndex: 2600, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+            onClick={() => setSelectedFullReview(null)}
+          >
+            <div 
+              className="glass" 
+              style={{ 
+                width: '100%', 
+                maxWidth: '500px', 
+                background: 'rgba(9, 26, 30, 0.98)', 
+                backdropFilter: 'blur(20px)',
+                border: '1px solid var(--border-glass-focus)',
+                borderRadius: '16px 16px 0 0',
+                padding: '1.5rem',
+                boxShadow: '0 -5px 25px rgba(0,0,0,0.6)',
+                animation: 'slideUp 0.25s ease-out'
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex-between" style={{ marginBottom: '1rem' }}>
+                <span 
+                  style={{ 
+                    fontSize: '0.7rem', 
+                    padding: '0.15rem 0.5rem', 
+                    borderRadius: '12px', 
+                    fontWeight: 700,
+                    ...getSourceBadgeStyle(selectedFullReview.source)
+                  }}
+                >
+                  {selectedFullReview.source} Review
+                </span>
+                <button className="btn-text" style={{ padding: 0 }} onClick={() => setSelectedFullReview(null)}>
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div style={{ maxHeight: '350px', overflowY: 'auto', paddingRight: '0.5rem', scrollbarWidth: 'thin' }}>
+                <p style={{ fontSize: '0.9rem', color: 'var(--text-primary)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                  {selectedFullReview.excerpt}
+                </p>
+              </div>
+
+              {selectedFullReview.sourceUrl && (
+                <div style={{ marginTop: '1.25rem', borderTop: '1px solid var(--border-glass)', paddingTop: '0.75rem', display: 'flex', justifyContent: 'flex-end' }}>
+                  <a 
+                    href={selectedFullReview.sourceUrl} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="btn btn-text"
+                    style={{ fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.25rem', fontWeight: 600, padding: 0 }}
+                  >
+                    Read on {selectedFullReview.source}
+                    <ExternalLink size={12} />
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );

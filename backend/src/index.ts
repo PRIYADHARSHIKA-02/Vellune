@@ -13,6 +13,7 @@ import notesRouter from './routes/notes.js';
 import circlesRouter from './routes/circles.js';
 import shelvesRouter from './routes/shelves.js';
 import invitationsRouter from './routes/invitations.js';
+import reviewsRouter from './routes/reviews.js';
 
 dotenv.config();
 
@@ -57,6 +58,7 @@ app.use('/api/v1/notes', notesRouter);
 app.use('/api/v1/circles', circlesRouter);
 app.use('/api/v1/shelves', shelvesRouter);
 app.use('/api/v1/invitations', invitationsRouter);
+app.use('/api/v1', reviewsRouter);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

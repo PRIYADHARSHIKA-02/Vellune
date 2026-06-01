@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, integer, decimal, boolean, timestamp, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, integer, decimal, boolean, timestamp, jsonb, unique } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // Users Table
@@ -184,6 +184,53 @@ export const recommendations = pgTable('recommendations', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
+// External Reviews Table
+export const externalReviews = pgTable('external_reviews', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  bookId: uuid('book_id').references(() => books.id, { onDelete: 'cascade' }),
+  isbn: varchar('isbn', { length: 13 }),
+  source: varchar('source', { length: 50 }).notNull(), // 'goodreads' | 'nyt' | 'guardian' | 'openlibrary' | 'amazon' | 'librarything'
+  excerpt: text('excerpt').notNull(),
+  fullText: text('full_text'),
+  starRating: decimal('star_rating', { precision: 3, scale: 2 }),
+  reviewerType: varchar('reviewer_type', { length: 20 }).notNull(), // 'editorial' | 'community'
+  helpfulVotes: integer('helpful_votes'),
+  sourceUrl: text('source_url'),
+  fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+});
+
+// Book Rating Aggregates Table
+export const bookRatingAggregates = pgTable('book_rating_aggregates', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  bookId: uuid('book_id').references(() => books.id, { onDelete: 'cascade' }).unique(),
+  isbn: varchar('isbn', { length: 13 }).unique(),
+  weightedAvgScore: decimal('weighted_avg_score', { precision: 3, scale: 2 }).notNull(),
+  totalRatingCount: integer('total_rating_count').notNull(),
+  positivePct: integer('positive_pct').default(0).notNull(),
+  neutralPct: integer('neutral_pct').default(0).notNull(),
+  criticalPct: integer('critical_pct').default(0).notNull(),
+  ratingDistribution: jsonb('rating_distribution').default({}).notNull(), // { "5": N, "4": N, ... }
+  lastUpdatedAt: timestamp('last_updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// User Book Reviews Table
+export const userBookReviews = pgTable('user_book_reviews', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  bookId: uuid('book_id').references(() => books.id, { onDelete: 'cascade' }).notNull(),
+  starRating: decimal('star_rating', { precision: 2, scale: 1 }).notNull(), // e.g. 4.5
+  moodTags: text('mood_tags').array().notNull(),
+  recommend: varchar('recommend', { length: 10 }), // 'yes' | 'depends' | 'no'
+  reviewText: text('review_text'),
+  isShared: boolean('is_shared').default(false).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, (t) => ({
+  unq: unique().on(t.userId, t.bookId)
+}));
+
 // Define ORM Relations
 export const usersRelations = relations(users, ({ many }) => ({
   books: many(books),
@@ -197,6 +244,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   recommendations: many(recommendations),
   sentInvitations: many(circleInvitations, { relationName: 'sentInvitations' }),
   receivedInvitations: many(circleInvitations, { relationName: 'receivedInvitations' }),
+  userReviews: many(userBookReviews),
 }));
 
 export const booksRelations = relations(books, ({ one, many }) => ({
@@ -205,6 +253,12 @@ export const booksRelations = relations(books, ({ one, many }) => ({
   notes: many(notes),
   circlesCurrent: many(readingCircles),
   threads: many(discussionThreads),
+  externalReviews: many(externalReviews),
+  ratingAggregate: one(bookRatingAggregates, {
+    fields: [books.id],
+    references: [bookRatingAggregates.bookId],
+  }),
+  userReviews: many(userBookReviews),
 }));
 
 export const readingSessionsRelations = relations(readingSessions, ({ one }) => ({
@@ -253,4 +307,17 @@ export const circleInvitationsRelations = relations(circleInvitations, ({ one })
 export const recommendationsRelations = relations(recommendations, ({ one }) => ({
   user: one(users, { fields: [recommendations.userId], references: [users.id] }),
   book: one(books, { fields: [recommendations.bookId], references: [books.id] }),
+}));
+
+export const externalReviewsRelations = relations(externalReviews, ({ one }) => ({
+  book: one(books, { fields: [externalReviews.bookId], references: [books.id] }),
+}));
+
+export const bookRatingAggregatesRelations = relations(bookRatingAggregates, ({ one }) => ({
+  book: one(books, { fields: [bookRatingAggregates.bookId], references: [books.id] }),
+}));
+
+export const userBookReviewsRelations = relations(userBookReviews, ({ one }) => ({
+  user: one(users, { fields: [userBookReviews.userId], references: [users.id] }),
+  book: one(books, { fields: [userBookReviews.bookId], references: [books.id] }),
 }));

@@ -8,18 +8,12 @@ import { useRouter } from 'next/navigation';
 
 export default function HomePage() {
   const { 
-    activeSession, startReadingSession, setSelectedBookIdForDetail, user 
+    activeSession, startReadingSession, setSelectedBookIdForDetail, setFinishedBookToRate, user 
   } = useStore();
   
   const router = useRouter();
   const [showMonthModal, setShowMonthModal] = useState(false);
-  const [isFinishedModalOpen, setIsFinishedModalOpen] = useState(false);
-  const [finishedBookObj, setFinishedBookObj] = useState<any | null>(null);
-  const [finishedRating, setFinishedRating] = useState<number>(0);
-  const [selectedFeelings, setSelectedFeelings] = useState<string[]>([]);
-  const [finishedTimeValue, setFinishedTimeValue] = useState<number>(0);
-  const [finishedTimeUnit, setFinishedTimeUnit] = useState<string>('days');
-  const [finishedThought, setFinishedThought] = useState<string>('');
+
 
   const updateBookMutation = useUpdateBook();
   const addNoteMutation = useAddNote();
@@ -95,59 +89,7 @@ export default function HomePage() {
     router.push('/track');
   };
 
-  const toggleFeeling = (feeling: string) => {
-    if (selectedFeelings.includes(feeling)) {
-      setSelectedFeelings(selectedFeelings.filter(f => f !== feeling));
-    } else {
-      setSelectedFeelings([...selectedFeelings, feeling]);
-    }
-  };
 
-  const handleMarkAsFinishedSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!finishedBookObj) return;
-
-    try {
-      const updatedMetadata = {
-        ...(finishedBookObj.metadata || {}),
-        rating: finishedRating,
-        feelings: selectedFeelings,
-        timeTaken: finishedTimeValue > 0 ? { value: finishedTimeValue, unit: finishedTimeUnit } : null
-      };
-
-      await updateBookMutation.mutateAsync({
-        id: finishedBookObj.id,
-        updates: {
-          status: 'finished',
-          currentPage: finishedBookObj.pageCount || 0,
-          dateFinished: new Date().toISOString(),
-          metadata: updatedMetadata
-        }
-      });
-
-      if (finishedThought.trim()) {
-        await addNoteMutation.mutateAsync({
-          bookId: finishedBookObj.id,
-          type: 'thought' as any,
-          content: finishedThought.trim(),
-          pageNumber: finishedBookObj.pageCount || 0,
-          tags: selectedFeelings,
-          isFavorite: false
-        });
-      }
-
-      // Reset
-      setIsFinishedModalOpen(false);
-      setFinishedBookObj(null);
-      setFinishedRating(0);
-      setSelectedFeelings([]);
-      setFinishedTimeValue(0);
-      setFinishedTimeUnit('days');
-      setFinishedThought('');
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to update book to finished.');
-    }
-  };
 
   const isLoading = isBooksLoading || isSessionsLoading || isNotesLoading || isCirclesLoading;
 
@@ -361,8 +303,7 @@ export default function HomePage() {
                             style={{ padding: '0.4rem 0.8rem', fontSize: '0.75rem', display: 'flex', gap: '0.25rem', alignItems: 'center', justifyContent: 'center', color: '#091A1E', fontWeight: 700, width: '100%' }}
                             onClick={(e) => { 
                               e.stopPropagation(); 
-                              setFinishedBookObj(book);
-                              setIsFinishedModalOpen(true);
+                              setFinishedBookToRate(book);
                             }}
                           >
                             Finished
@@ -502,155 +443,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Finished Book Modal Overlay */}
-      {isFinishedModalOpen && finishedBookObj && (
-        <div className="modal-overlay" style={{ display: 'flex', zIndex: 1000 }}>
-          <div className="modal-content glass animate-fade-in" style={{ maxWidth: '420px', padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            <button 
-              className="modal-close" 
-              onClick={() => {
-                setIsFinishedModalOpen(false);
-                setFinishedBookObj(null);
-              }}
-            >
-              <X size={18} />
-            </button>
 
-            <div style={{ textAlign: 'center', borderBottom: '1px solid var(--border-glass)', paddingBottom: '1rem' }}>
-              <h3 style={{ fontSize: '1.4rem', color: 'var(--text-primary)', fontFamily: 'var(--font-display)', marginBottom: '0.25rem' }}>
-                You finished it!
-              </h3>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                <strong>{finishedBookObj.title}</strong> · {finishedBookObj.author}
-              </p>
-            </div>
-
-            <form onSubmit={handleMarkAsFinishedSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              
-              {/* Star Rating */}
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Rating</span>
-                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', margin: '0.5rem 0' }}>
-                  {[1, 2, 3, 4, 5].map(starNum => {
-                    const isFilled = finishedRating >= starNum;
-                    return (
-                      <button
-                        key={starNum}
-                        type="button"
-                        onClick={() => setFinishedRating(starNum)}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.25rem' }}
-                      >
-                        <Star 
-                          size={28} 
-                          fill={isFilled ? 'var(--accent-primary)' : 'none'} 
-                          style={{ color: isFilled ? 'var(--accent-primary)' : 'var(--text-muted)' }} 
-                        />
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Feelings */}
-              <div>
-                <div style={{ textAlign: 'center', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
-                  How did it make you feel?
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', justifyContent: 'center' }}>
-                  {['Reflective', 'Hopeful', 'Emotional', 'Surprised', 'Challenged', 'Entertained'].map(feeling => {
-                    const isSelected = selectedFeelings.includes(feeling);
-                    return (
-                      <button
-                        key={feeling}
-                        type="button"
-                        onClick={() => toggleFeeling(feeling)}
-                        style={{
-                          padding: '0.35rem 0.85rem',
-                          borderRadius: 'var(--radius-full)',
-                          border: isSelected ? '1px solid #818CF8' : '1px solid var(--border-glass)',
-                          cursor: 'pointer',
-                          fontSize: '0.75rem',
-                          fontWeight: 600,
-                          transition: 'all 0.2s',
-                          backgroundColor: isSelected ? '#E0E7FF' : 'rgba(255, 255, 255, 0.02)',
-                          color: isSelected ? '#4338CA' : 'var(--text-secondary)'
-                        }}
-                      >
-                        {feeling}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Time taken */}
-              <div>
-                <div style={{ textAlign: 'center', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
-                  How long did it take to read?
-                </div>
-                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                  <input
-                    type="number"
-                    min={0}
-                    placeholder="e.g. 5"
-                    className="form-input"
-                    style={{ flexGrow: 1, textAlign: 'center' }}
-                    value={finishedTimeValue || ''}
-                    onChange={e => setFinishedTimeValue(parseInt(e.target.value) || 0)}
-                  />
-                  <select
-                    className="form-select"
-                    style={{ width: '130px' }}
-                    value={finishedTimeUnit}
-                    onChange={e => setFinishedTimeUnit(e.target.value)}
-                  >
-                    <option value="hours">Hours</option>
-                    <option value="days">Days</option>
-                    <option value="weeks">Weeks</option>
-                    <option value="months">Months</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* One thought */}
-              <div>
-                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.4rem' }}>
-                  One thought (optional)
-                </div>
-                <textarea
-                  rows={3}
-                  className="form-input"
-                  style={{ width: '100%', resize: 'none', background: 'rgba(0, 0, 0, 0.2)' }}
-                  placeholder="Made me think about my own what-ifs."
-                  value={finishedThought}
-                  onChange={e => setFinishedThought(e.target.value)}
-                />
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  style={{ width: '100%', padding: '0.65rem', color: '#091A1E', fontWeight: 700, fontSize: '0.9rem', cursor: 'pointer', textAlign: 'center' }}
-                >
-                  Save & mark as finished
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-text"
-                  style={{ width: '100%', color: 'var(--text-secondary)', fontSize: '0.8rem', cursor: 'pointer', textAlign: 'center', background: 'none', border: 'none' }}
-                  onClick={() => {
-                    setIsFinishedModalOpen(false);
-                    setFinishedBookObj(null);
-                  }}
-                >
-                  Skip for now
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
     </div>
   );

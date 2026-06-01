@@ -23,14 +23,20 @@ export interface ActiveSessionState {
 interface StoreState {
   activeSession: ActiveSessionState | null;
   selectedBookIdForDetail: string | null;
+  selectedExternalBook: any | null;
+  finishedBookToRate: any | null;
   theme: 'dark' | 'light';
   user: UserProfile | null;
   token: string | null;
   isAuthenticated: boolean;
+  defaultAddBookStatus: 'to-read' | 'reading' | 'finished';
   
   // Actions
   initStore: () => void;
   setSelectedBookIdForDetail: (id: string | null) => void;
+  setSelectedExternalBook: (book: any | null) => void;
+  setFinishedBookToRate: (book: any | null) => void;
+  setDefaultAddBookStatus: (status: 'to-read' | 'reading' | 'finished') => void;
   toggleTheme: () => void;
   login: (token: string, user: UserProfile) => void;
   logout: () => void;
@@ -42,10 +48,13 @@ interface StoreState {
 export const useStore = create<StoreState>((set, get) => ({
   activeSession: null,
   selectedBookIdForDetail: null,
+  selectedExternalBook: null,
+  finishedBookToRate: null,
   theme: 'dark',
   user: null,
   token: null,
   isAuthenticated: false,
+  defaultAddBookStatus: 'to-read',
 
   initStore: () => {
     if (typeof window === 'undefined') return;
@@ -70,6 +79,9 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   setSelectedBookIdForDetail: (id) => set({ selectedBookIdForDetail: id }),
+  setSelectedExternalBook: (book) => set({ selectedExternalBook: book }),
+  setFinishedBookToRate: (book) => set({ finishedBookToRate: book }),
+  setDefaultAddBookStatus: (status) => set({ defaultAddBookStatus: status }),
 
   toggleTheme: () => {
     const nextTheme = get().theme === 'dark' ? 'light' : 'dark';

@@ -40,6 +40,7 @@ interface AddBookModalProps {
 export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) => {
   const { data: shelves = [] } = useShelves();
   const addBookMutation = useAddBook();
+  const { defaultAddBookStatus, setFinishedBookToRate } = useStore();
 
   // Autocomplete Search States
   const [apiSearchQuery, setApiSearchQuery] = useState('');
@@ -70,6 +71,26 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
   const formatType = watch('format');
   const selectedShelves = watch('customShelfIds') || [];
   const selectedGenres = watch('genres') || [];
+
+  useEffect(() => {
+    if (isOpen) {
+      reset({
+        title: '',
+        author: '',
+        isbn: '',
+        coverUrl: '',
+        format: 'physical',
+        status: defaultAddBookStatus || 'to-read',
+        currentPage: 0,
+        pageCount: 300,
+        platform: '',
+        shelfLocation: '',
+        dueDate: '',
+        customShelfIds: [],
+        genres: [],
+      });
+    }
+  }, [isOpen, defaultAddBookStatus, reset]);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -120,7 +141,7 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
 
   const onSubmit = async (values: BookFormValues) => {
     try {
-      await addBookMutation.mutateAsync({
+      const createdBook = await addBookMutation.mutateAsync({
         title: values.title,
         author: values.author,
         isbn: values.isbn || null,
@@ -144,6 +165,10 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
       setApiSearchQuery('');
       setApiResults([]);
       onClose();
+
+      if (values.status === 'finished') {
+        setFinishedBookToRate(createdBook);
+      }
     } catch (err: any) {
       alert(err.response?.data?.error || 'Failed to add book to library.');
     }

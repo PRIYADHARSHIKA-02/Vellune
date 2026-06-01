@@ -23,7 +23,7 @@ const MOOD_OPTIONS = [
 ];
 
 export const EndSessionModal: React.FC<EndSessionModalProps> = ({ isOpen, onClose }) => {
-  const { activeSession, cancelReadingSession } = useStore();
+  const { activeSession, cancelReadingSession, setFinishedBookToRate } = useStore();
   const { data: books = [] } = useBooks();
   const addSessionMutation = useAddSession();
 
@@ -89,6 +89,11 @@ export const EndSessionModal: React.FC<EndSessionModalProps> = ({ isOpen, onClos
       cancelReadingSession();
       reset();
       onClose();
+
+      // Trigger finished sheet if page progress completed
+      if (values.pagesEnd >= book.pageCount) {
+        setFinishedBookToRate(book);
+      }
     } catch (err: any) {
       alert(err.response?.data?.error || 'Failed to record reading session.');
     }

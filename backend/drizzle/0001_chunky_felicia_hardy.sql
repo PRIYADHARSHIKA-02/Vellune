@@ -1,0 +1,1 @@
+ALTER TABLE "user_book_reviews" ALTER COLUMN "mood_tags" DROP DEFAULT;

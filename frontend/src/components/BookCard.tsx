@@ -191,6 +191,11 @@ export const BookCard: React.FC<BookCardProps> = ({ book, onSelect, showDelete =
                 Finished
               </span>
             )}
+            {book.status === 'finished' && book.userReviews && book.userReviews.length > 0 && (
+              <span className="status-pill" style={{ background: 'rgba(139, 92, 246, 0.1)', color: '#c084fc', border: '1px solid rgba(139, 92, 246, 0.2)' }}>
+                Your rating: {parseFloat(book.userReviews[0].starRating).toFixed(1)} ★
+              </span>
+            )}
             {book.status === 'to-read' && (
               <span className="status-pill" style={{ background: 'rgba(74, 163, 169, 0.1)', color: 'var(--color-to-read)' }}>
                 <span className="status-dot" style={{ backgroundColor: 'var(--color-to-read)' }}></span>
