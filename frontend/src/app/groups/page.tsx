@@ -32,6 +32,7 @@ import {
   Share2, Clipboard, Edit2, Trash2, Smile, Bell, Check, Info, ShieldAlert
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { getCrispDescription } from '../../lib/text';
 
 const calculatePercentage = (progress: number, pageCount: number | null): number => {
   if (!pageCount || pageCount <= 0) return 0;
@@ -1140,7 +1141,7 @@ export default function GroupsPage() {
                 <h3 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-display)' }}>About the book</h3>
                 {activeCircle.currentBook.description && (
                   <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', lineHeight: 1.6, maxWidth: '720px' }}>
-                    {activeCircle.currentBook.description}
+                    {getCrispDescription(activeCircle.currentBook.description)}
                   </p>
                 )}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.5rem' }}>

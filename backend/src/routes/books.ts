@@ -5,6 +5,7 @@ import { books } from '../db/schema.js';
 import { authMiddleware } from '../middlewares/auth.js';
 import { CacheService } from '../services/cache.js';
 import { BookAPIService } from '../services/book-apis.js';
+import axios from 'axios';
 
 const router = Router();
 
@@ -90,12 +91,34 @@ router.get('/search', authMiddleware, async (req, res) => {
       console.log(`[Redis] Cache Hit for GET search: "${sanitizedQuery}"`);
     }
 
+    // Fetch user's books to check if search results are already on shelf
+    const userBooks = await db.query.books.findMany({
+      where: eq(books.userId, tokenUser.id)
+    });
+
+    // Find any books on the user's shelf that match the search query (by title or author)
+    const matchingUserBooks = userBooks.filter((ub: any) => 
+      ub.title.toLowerCase().includes(sanitizedQuery) ||
+      ub.author.toLowerCase().includes(sanitizedQuery)
+    );
+
     const normalisedResults = results.map((book: any) => {
       let year = null;
       if (book.publishedDate) {
         const match = book.publishedDate.match(/^(\d{4})/);
         if (match) year = parseInt(match[1]);
       }
+
+      // Check if this book is already on the user's shelf
+      const matchedUserBook = userBooks.find((ub: any) => {
+        if (book.isbn && ub.isbn && book.isbn === ub.isbn) {
+          return true;
+        }
+        return (
+          ub.title.toLowerCase() === book.title.toLowerCase() &&
+          ub.author.toLowerCase() === book.author.toLowerCase()
+        );
+      });
 
       return {
         title: book.title,
@@ -106,15 +129,84 @@ router.get('/search', authMiddleware, async (req, res) => {
         genres: book.genres || [],
         external_avg_rating: book.averageRating || 4.2,
         external_rating_count: book.ratingsCount || 120,
-        onShelf: false,
-        savedBookId: null
+        description: book.description || null,
+        onShelf: !!matchedUserBook,
+        savedBookId: matchedUserBook ? matchedUserBook.id : null
       };
     });
 
-    return res.json(normalisedResults);
+    // Merge in any matching user shelf books that aren't already present in the search results
+    const finalResults = [...normalisedResults];
+    for (const ub of matchingUserBooks) {
+      const alreadyIncluded = normalisedResults.some((r: any) => 
+        (ub.isbn && r.isbn && ub.isbn === r.isbn) ||
+        (r.title.toLowerCase() === ub.title.toLowerCase() && r.author.toLowerCase() === ub.author.toLowerCase())
+      );
+      if (!alreadyIncluded) {
+        let year = null;
+        if (ub.publishedDate) {
+          year = new Date(ub.publishedDate).getFullYear();
+        }
+        finalResults.unshift({
+          title: ub.title,
+          author: ub.author,
+          isbn: ub.isbn || null,
+          cover_url: ub.coverUrl || null,
+          year: year,
+          genres: ub.genres || [],
+          external_avg_rating: 4.2,
+          external_rating_count: 120,
+          description: ub.description || null,
+          onShelf: true,
+          savedBookId: ub.id
+        });
+      }
+    }
+
+    return res.json(finalResults);
   } catch (error: any) {
     console.error('Book search GET error:', error);
     return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /api/v1/books/price - Fetch actual e-commerce prices dynamically (using backend fetch + parsing)
+router.get('/price', authMiddleware, async (req, res) => {
+  const { title, author } = req.query;
+  if (!title) {
+    return res.status(400).json({ error: 'Title query parameter is required.' });
+  }
+
+  const queryStr = `${title} ${author || ''}`.trim();
+  const cacheKey = `price:query:${queryStr.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+  const CACHE_TTL_PRICE = 43200; // 12 hours
+
+  try {
+    // Check cache
+    const cached = await CacheService.get(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
+    // Fetch Amazon and Flipkart in parallel
+    const [amazonPrice, flipkartPrice] = await Promise.all([
+      fetchAmazonPrice(queryStr),
+      fetchFlipkartPrice(queryStr)
+    ]);
+
+    const result = {
+      amazon: amazonPrice ? `₹${amazonPrice}` : 'N/A',
+      flipkart: flipkartPrice ? `₹${flipkartPrice}` : 'N/A',
+      playbooks: amazonPrice ? `₹${Math.round(amazonPrice * 0.75)}` : 'N/A',
+    };
+
+    // Save to cache
+    await CacheService.set(cacheKey, result, CACHE_TTL_PRICE);
+
+    return res.json(result);
+  } catch (err: any) {
+    console.error('Fetch price endpoint error:', err.message);
+    return res.json({ amazon: 'N/A', flipkart: 'N/A', playbooks: 'N/A' });
   }
 });
 
@@ -259,5 +351,77 @@ router.delete('/:id', authMiddleware, async (req, res) => {
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
+
+// Helper scraper function for Amazon India
+async function fetchAmazonPrice(query: string): Promise<number | null> {
+  try {
+    const url = `https://www.amazon.in/s?k=${encodeURIComponent(query)}`;
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5'
+      },
+      timeout: 8000
+    });
+
+    const html = response.data;
+    const matches = html.match(/class="a-price-whole">([0-9,]+)/g) || [];
+    const parsedPrices = matches.map((m: string) => {
+      const parts = m.match(/class="a-price-whole">([0-9,]+)/);
+      return parts ? parseInt(parts[1].replace(/,/g, '')) : null;
+    }).filter((p: number | null): p is number => p !== null && p > 80);
+
+    if (parsedPrices.length === 0) return null;
+    // Take the minimum of the first 5 parsed prices to represent the lowest buying choice for the product
+    const relevantPrices = parsedPrices.slice(0, 5);
+    return Math.min(...relevantPrices);
+  } catch (err: any) {
+    console.warn('Amazon price fetch failed:', err.message);
+    return null;
+  }
+}
+
+// Helper scraper function for Flipkart
+async function fetchFlipkartPrice(query: string): Promise<number | null> {
+  try {
+    const url = `https://www.flipkart.com/search?q=${encodeURIComponent(query)}`;
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5'
+      },
+      timeout: 8000
+    });
+
+    const html = response.data;
+    const matches = html.match(/₹([0-9,]+)/g) || [];
+    const parsedPrices = matches.map((m: string) => {
+      const parts = m.match(/₹([0-9,]+)/);
+      return parts ? parseInt(parts[1].replace(/,/g, '')) : null;
+    }).filter((p: number | null): p is number => 
+      p !== null && 
+      p > 80 && 
+      p !== 100 && 
+      p !== 200 && 
+      p !== 500 && 
+      p !== 1000 && 
+      p !== 1500 && 
+      p !== 2000 && 
+      p !== 2500 && 
+      p !== 5000 && 
+      p !== 10000
+    );
+
+    if (parsedPrices.length === 0) return null;
+    // Take the minimum of the first 5 relevant parsed prices
+    const relevantPrices = parsedPrices.slice(0, 5);
+    return Math.min(...relevantPrices);
+  } catch (err: any) {
+    console.warn('Flipkart price fetch failed:', err.message);
+    return null;
+  }
+}
 
 export default router;

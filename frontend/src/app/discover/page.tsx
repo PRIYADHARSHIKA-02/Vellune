@@ -87,7 +87,7 @@ export default function DiscoverPage() {
   const { data: books = [], isLoading: isBooksLoading } = useBooks();
   const addBookMutation = useAddBook();
 
-  const { data: searchResults = [], isLoading: isSearchLoading, isFetching: isSearchFetching } = useGetSearchBooks(debouncedQuery, debouncedQuery.length > 2);
+  const { data: searchResults = [], isLoading: isSearchLoading, isFetching: isSearchFetching, isError, error } = useGetSearchBooks(debouncedQuery, debouncedQuery.length > 2);
 
   const formatRatingCount = (count: number) => {
     if (!count) return '0';
@@ -109,7 +109,8 @@ export default function DiscoverPage() {
         pageCount: 300,
         genres: searchBook.genres,
         external_avg_rating: searchBook.external_avg_rating,
-        external_rating_count: searchBook.external_rating_count
+        external_rating_count: searchBook.external_rating_count,
+        description: searchBook.description
       };
       setSelectedExternalBook(externalBookDetails);
       setSelectedBookIdForDetail(searchBook.isbn || 'external');
@@ -131,6 +132,7 @@ export default function DiscoverPage() {
         customShelfIds: [],
         metadata: {},
         currentPage: 0,
+        description: searchBook.description || null,
       });
       setLearningFeedback(`Successfully added "${searchBook.title}" to your TBR shelf!`);
       setTimeout(() => setLearningFeedback(''), 4000);
@@ -158,19 +160,19 @@ export default function DiscoverPage() {
   // Filtering logic
   const activeRecs = recs.filter(rec => {
     if (rec.status !== 'pending') return false;
-    
+
     // Mood Filter
     if (selectedMood) {
       const moodConfig = MOODS.find(m => m.id === selectedMood);
       if (moodConfig && !rec.moodTags.includes(moodConfig.tag)) return false;
     }
-    
+
     // Time Filter
     if (selectedTime) {
       if (selectedTime <= 30 && !rec.timeTags.includes('short') && !rec.timeTags.includes('moderate')) return false;
       if (selectedTime > 60 && !rec.timeTags.includes('long')) return false;
     }
-    
+
     return true;
   });
 
@@ -208,7 +210,7 @@ export default function DiscoverPage() {
 
   // Smart TBR queue sorting
   const tbrBooks = books.filter(b => b.status === 'to-read');
-  
+
   // Reorder TBR books based on selected mood/time
   const getSmartTbrBooks = () => {
     if (!selectedMood && !selectedTime) return tbrBooks;
@@ -221,7 +223,7 @@ export default function DiscoverPage() {
       if (selectedMood) {
         const moodConfig = MOODS.find(m => m.id === selectedMood);
         const moodTag = moodConfig?.tag || '';
-        
+
         if (moodTag === 'curious' && a.author === 'Andy Weir') scoreA += 2;
         if (moodTag === 'curious' && b.author === 'Andy Weir') scoreB += 2;
         if (moodTag === 'meditative' && a.author === 'Kazuo Ishiguro') scoreA += 2;
@@ -260,7 +262,7 @@ export default function DiscoverPage() {
 
   return (
     <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      
+
       {/* Header */}
       <div>
         <h1 className="screen-title">Discover Reads</h1>
@@ -268,12 +270,12 @@ export default function DiscoverPage() {
       </div>
 
       {/* Search Input Bar */}
-      <div 
-        className="glass animate-fade-in" 
-        style={{ 
-          padding: '0.5rem 1rem', 
-          display: 'flex', 
-          alignItems: 'center', 
+      <div
+        className="glass animate-fade-in"
+        style={{
+          padding: '0.5rem 1rem',
+          display: 'flex',
+          alignItems: 'center',
           gap: '0.75rem',
           background: 'rgba(255, 255, 255, 0.02)',
           borderColor: 'var(--border-glass)',
@@ -283,7 +285,7 @@ export default function DiscoverPage() {
         }}
       >
         <Search size={18} style={{ color: 'var(--text-muted)' }} />
-        <input 
+        <input
           ref={searchInputRef}
           type="text"
           value={searchQuery}
@@ -300,7 +302,7 @@ export default function DiscoverPage() {
           }}
         />
         {searchQuery && (
-          <button 
+          <button
             type="button"
             className="btn btn-text"
             style={{ padding: '0.2rem', color: 'var(--text-muted)' }}
@@ -337,6 +339,13 @@ export default function DiscoverPage() {
               <Loader2 className="animate-spin" size={24} style={{ color: 'var(--accent-primary)' }} />
               <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Searching external database...</span>
             </div>
+          ) : isError ? (
+            <div className="glass" style={{ padding: '3rem', textAlign: 'center', color: 'var(--color-dnf)', borderColor: 'rgba(239,68,68,0.2)' }}>
+              <p style={{ fontWeight: 600 }}>Failed to fetch search results.</p>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
+                {(error as any)?.response?.data?.error || (error as any)?.message || 'Please log out and log back in, or check your connection.'}
+              </p>
+            </div>
           ) : searchResults.length === 0 ? (
             <div className="glass" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
               <p>No books found for "{debouncedQuery}".</p>
@@ -345,14 +354,14 @@ export default function DiscoverPage() {
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1rem' }}>
               {searchResults.map((book, idx) => (
-                <div 
-                  key={idx} 
-                  className="glass card-hover" 
+                <div
+                  key={idx}
+                  className="glass card-hover"
                   onClick={() => handleCardClick(book)}
-                  style={{ 
-                    padding: '1rem', 
-                    display: 'flex', 
-                    gap: '1rem', 
+                  style={{
+                    padding: '1rem',
+                    display: 'flex',
+                    gap: '1rem',
                     cursor: 'pointer',
                     background: 'rgba(255, 255, 255, 0.01)',
                     borderColor: 'var(--border-glass)',
@@ -361,10 +370,10 @@ export default function DiscoverPage() {
                     alignItems: 'center'
                   }}
                 >
-                  <img 
-                    src={book.cover_url || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=100'} 
-                    alt={book.title} 
-                    style={{ width: '60px', height: '90px', borderRadius: '4px', objectFit: 'cover', flexShrink: 0 }} 
+                  <img
+                    src={book.cover_url || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=100'}
+                    alt={book.title}
+                    style={{ width: '60px', height: '90px', borderRadius: '4px', objectFit: 'cover', flexShrink: 0 }}
                     onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=100' }}
                   />
                   <div style={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'space-between' }}>
@@ -375,16 +384,16 @@ export default function DiscoverPage() {
                       <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginTop: '0.1rem', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                         by {book.author} {book.year ? `(${book.year})` : ''}
                       </p>
-                      
+
                       {/* Rating details */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.35rem' }}>
                         <div style={{ display: 'flex' }}>
                           {Array.from({ length: 5 }).map((_, i) => (
-                            <Star 
-                              key={i} 
-                              size={10} 
-                              fill={book.external_avg_rating >= i + 1 ? 'var(--color-on-hold)' : 'none'} 
-                              style={{ color: book.external_avg_rating >= i + 1 ? 'var(--color-on-hold)' : 'rgba(255,255,255,0.15)', marginRight: '1px' }} 
+                            <Star
+                              key={i}
+                              size={10}
+                              fill={book.external_avg_rating >= i + 1 ? 'var(--color-on-hold)' : 'none'}
+                              style={{ color: book.external_avg_rating >= i + 1 ? 'var(--color-on-hold)' : 'rgba(255,255,255,0.15)', marginRight: '1px' }}
                             />
                           ))}
                         </div>
@@ -408,21 +417,21 @@ export default function DiscoverPage() {
                   {/* Actions */}
                   <div style={{ flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
                     {book.onShelf ? (
-                      <span 
-                        style={{ 
-                          fontSize: '0.72rem', 
-                          padding: '0.25rem 0.5rem', 
-                          borderRadius: '4px', 
-                          background: 'rgba(16, 185, 129, 0.1)', 
-                          color: 'var(--color-finished)', 
-                          fontWeight: 700 
+                      <span
+                        style={{
+                          fontSize: '0.72rem',
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '4px',
+                          background: 'rgba(16, 185, 129, 0.1)',
+                          color: 'var(--color-finished)',
+                          fontWeight: 700
                         }}
                       >
                         On Shelf
                       </span>
                     ) : (
-                      <button 
-                        className="btn btn-primary" 
+                      <button
+                        className="btn btn-primary"
                         style={{ padding: '0.35rem 0.6rem', fontSize: '0.72rem', color: '#091A1E', fontWeight: 700 }}
                         onClick={(e) => handleAddSearchBook(e, book)}
                       >
@@ -438,10 +447,10 @@ export default function DiscoverPage() {
       ) : (
         /* Grid of selectors */
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.8fr', gap: '2rem' }}>
-          
+
           {/* Left Column: Selectors */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            
+
             {/* Mood Selector panel */}
             <div className="glass" style={{ padding: '1.5rem' }}>
               <h3 style={{ fontSize: '1.05rem', fontFamily: 'var(--font-display)', marginBottom: '1.25rem', display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
@@ -510,12 +519,12 @@ export default function DiscoverPage() {
 
           {/* Right Column: Recommendations Feed */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            
+
             <div className="flex-between">
               <h3 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-display)' }}>Recommended Matches</h3>
               {(selectedMood || selectedTime) && (
-                <button 
-                  className="btn btn-secondary" 
+                <button
+                  className="btn btn-secondary"
                   style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}
                   onClick={() => { setSelectedMood(null); setSelectedTime(null); }}
                 >
@@ -533,10 +542,10 @@ export default function DiscoverPage() {
               ) : (
                 activeRecs.map((rec) => (
                   <div key={rec.id} className="glass" style={{ padding: '1.25rem', display: 'flex', gap: '1.25rem', alignItems: 'center' }}>
-                    <img 
-                      src={rec.coverUrl} 
-                      alt={rec.title} 
-                      style={{ width: '70px', height: '105px', borderRadius: '4px', objectFit: 'cover', flexShrink: 0 }} 
+                    <img
+                      src={rec.coverUrl}
+                      alt={rec.title}
+                      style={{ width: '70px', height: '105px', borderRadius: '4px', objectFit: 'cover', flexShrink: 0 }}
                       onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=100' }}
                     />
                     <div style={{ flexGrow: 1, minWidth: 0 }}>
@@ -554,15 +563,15 @@ export default function DiscoverPage() {
                       </p>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', flexShrink: 0 }}>
-                      <button 
-                        className="btn btn-primary" 
+                      <button
+                        className="btn btn-primary"
                         style={{ padding: '0.4rem 0.6rem', fontSize: '0.75rem' }}
                         onClick={() => handleAccept(rec.id, rec.title, rec.author, rec.coverUrl)}
                       >
                         <Check size={12} /> Add TBR
                       </button>
-                      <button 
-                        className="btn btn-secondary" 
+                      <button
+                        className="btn btn-secondary"
                         style={{ padding: '0.4rem 0.6rem', fontSize: '0.75rem', color: 'var(--color-dnf)', borderColor: 'rgba(239,68,68,0.1)' }}
                         onClick={() => handleReject(rec.id)}
                       >
@@ -580,14 +589,14 @@ export default function DiscoverPage() {
                 <Bookmark size={16} style={{ color: 'var(--color-on-hold)' }} />
                 Smart TBR Queue Reordering
               </h3>
-              
+
               <div className="glass" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
                 {smartTbrList.length === 0 ? (
                   <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '1rem' }}>Your To Read shelf is empty. Add recommended books above!</p>
                 ) : (
                   smartTbrList.map((book, idx) => (
-                    <div 
-                      key={book.id} 
+                    <div
+                      key={book.id}
                       style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -606,7 +615,7 @@ export default function DiscoverPage() {
                       </div>
 
                       <div style={{ display: 'flex', gap: '0.2rem' }}>
-                        <button 
+                        <button
                           onClick={() => handleMoveUp(book.id, idx)}
                           disabled={idx === 0}
                           style={{ padding: '0.2rem', background: 'none', border: 'none', color: idx === 0 ? 'var(--text-muted)' : 'var(--text-secondary)', cursor: idx === 0 ? 'default' : 'pointer' }}

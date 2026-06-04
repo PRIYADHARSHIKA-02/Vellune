@@ -23,6 +23,7 @@ const bookBaseSchema = z.object({
   dueDate: z.string().optional(),
   customShelfIds: z.array(z.string()),
   genres: z.array(z.string()),
+  description: z.string().optional(),
 });
 
 const bookSchema = bookBaseSchema.refine(data => data.currentPage <= data.pageCount, {
@@ -47,6 +48,7 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
   const [apiResults, setApiResults] = useState<any[]>([]);
   const [isSearchingApi, setIsSearchingApi] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<BookFormValues>({
@@ -108,16 +110,21 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
     if (!apiSearchQuery.trim()) {
       setApiResults([]);
       setShowDropdown(false);
+      setSearchError(null);
       return;
     }
     const delayDebounceFn = setTimeout(async () => {
       setIsSearchingApi(true);
+      setSearchError(null);
       try {
         const response = await api.post('/books/search', { query: apiSearchQuery.trim() });
         setApiResults(response.data || []);
         setShowDropdown(true);
-      } catch (err) {
+      } catch (err: any) {
         console.error('Error fetching search suggestions:', err);
+        setSearchError(err.response?.data?.error || err.message || 'Failed to search');
+        setApiResults([]);
+        setShowDropdown(true);
       } finally {
         setIsSearchingApi(false);
       }
@@ -130,9 +137,10 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
     setValue('title', apiBook.title);
     setValue('author', apiBook.author);
     setValue('isbn', apiBook.isbn || '');
-    setValue('coverUrl', apiBook.coverUrl || '');
+    setValue('coverUrl', apiBook.coverUrl || apiBook.cover_url || '');
     setValue('pageCount', apiBook.pageCount || 300);
     setValue('genres', apiBook.genres || []);
+    setValue('description', apiBook.description || '');
     setShowDropdown(false);
     setApiSearchQuery('');
   };
@@ -152,6 +160,7 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
         pageCount: values.pageCount,
         customShelfIds: values.customShelfIds,
         genres: values.genres,
+        description: values.description || null,
         platform: values.platform || null,
         metadata: {
           shelfLocation: values.format === 'physical' ? values.shelfLocation : undefined,
@@ -257,7 +266,12 @@ export const AddBookModal: React.FC<AddBookModalProps> = ({ isOpen, onClose }) =
                     Searching books...
                   </div>
                 )}
-                {!isSearchingApi && apiResults.length === 0 && (
+                {searchError && (
+                  <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--color-dnf)', fontSize: '0.8rem' }}>
+                    {searchError}
+                  </div>
+                )}
+                {!isSearchingApi && !searchError && apiResults.length === 0 && (
                   <div style={{ padding: '1.25rem', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
                     No books found
                   </div>

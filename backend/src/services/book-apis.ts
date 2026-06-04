@@ -153,34 +153,93 @@ export class BookAPIService {
         publisher: "Avery",
         description: "An easy and proven way to build good habits and break bad ones.",
         genres: ["Self-Help", "Psychology"]
+      },
+      {
+        title: "Verity",
+        author: "Colleen Hoover",
+        isbn: "9781408726600",
+        coverUrl: "https://images-na.ssl-images-amazon.com/images/I/611b8Q3FEtL.jpg",
+        pageCount: 336,
+        publishedDate: "2018",
+        publisher: "Grand Central Publishing",
+        description: "Lowen Ashleigh is a struggling writer on the brink of financial ruin when she accepts the job offer of a lifetime. Jeremy Crawford, husband of author Verity Crawford, has hired Lowen to complete the remaining books in a successful series his injured wife is unable to finish.",
+        genres: ["Psychological Thriller", "Romance", "Mystery"]
+      },
+      {
+        title: "It Ends with Us",
+        author: "Colleen Hoover",
+        isbn: "9781501110368",
+        coverUrl: "https://images-na.ssl-images-amazon.com/images/I/71Hkv+O4VML.jpg",
+        pageCount: 384,
+        publishedDate: "2016",
+        publisher: "Atria Books",
+        description: "Lily hasn't always had it easy, but that's never stopped her from working hard for the life she wants. She's come a long way from the small town where she grew up—she graduated from college, moved to Boston, and started her own business. And when she feels a spark with a gorgeous neurosurgeon named Ryle Kincaid, everything in Lily's life seems too good to be true.",
+        genres: ["Romance", "Contemporary Fiction", "Drama"]
+      },
+      {
+        title: "Ugly Love",
+        author: "Colleen Hoover",
+        isbn: "9781476753188",
+        coverUrl: "https://images-na.ssl-images-amazon.com/images/I/71e9MY-8gKL.jpg",
+        pageCount: 336,
+        publishedDate: "2014",
+        publisher: "Atria Books",
+        description: "When Tate Collins meets airline pilot Miles Archer, she doesn't think it's love at first sight. They wouldn't even go so far as to consider themselves friends. The only thing Tate and Miles have in common is an undeniable mutual attraction. Once their desires are out in the open, they realize they have the perfect set-up.",
+        genres: ["Romance", "New Adult", "Drama"]
       }
     ];
 
+    // Find any local mock books matching the query
+    const lowerQuery = query.toLowerCase().trim();
+    const matchingLocalMock = localMockBooks.filter(b => 
+      b.title.toLowerCase().includes(lowerQuery) || 
+      b.author.toLowerCase().includes(lowerQuery) ||
+      (b.isbn && b.isbn.includes(lowerQuery))
+    );
+
+    let externalResults: ExternalBook[] = [];
     try {
       const gResults = await this.searchGoogleBooks(query);
       if (gResults && gResults.length > 0) {
-        return gResults;
+        externalResults = gResults;
       }
     } catch (error) {
       console.warn('[Google Books API] Search failed or timed out:', (error as any).message);
     }
 
-    try {
-      const olResults = await this.searchOpenLibrary(query);
-      if (olResults && olResults.length > 0) {
-        return olResults;
+    if (externalResults.length === 0) {
+      try {
+        const olResults = await this.searchOpenLibrary(query);
+        if (olResults && olResults.length > 0) {
+          externalResults = olResults;
+        }
+      } catch (olError) {
+        console.warn('[Open Library API] Search failed or timed out:', (olError as any).message);
       }
-    } catch (olError) {
-      console.warn('[Open Library API] Search failed or timed out:', (olError as any).message);
     }
 
-    // Both API searches returned empty or failed - use offline mock fallback
-    console.log('[Offline Fallback] Both APIs returned empty or offline. Using local mock database for query:', query);
-    const lowerQuery = query.toLowerCase();
-    const filtered = localMockBooks.filter(b => 
-      b.title.toLowerCase().includes(lowerQuery) || 
-      b.author.toLowerCase().includes(lowerQuery)
-    );
-    return filtered.length > 0 ? filtered : localMockBooks;
+    // Combine local matches and external results
+    const combinedResults = [...matchingLocalMock];
+    
+    // Add external results ensuring no duplicates
+    for (const extBook of externalResults) {
+      const isDuplicate = combinedResults.some(localBook => 
+        (extBook.isbn && localBook.isbn && extBook.isbn === localBook.isbn) ||
+        (extBook.title.toLowerCase() === localBook.title.toLowerCase() && 
+         extBook.author.toLowerCase() === localBook.author.toLowerCase())
+      );
+      if (!isDuplicate) {
+        combinedResults.push(extBook);
+      }
+    }
+
+    // If both local matches and external results are empty, return all local mock books as a last resort
+    if (combinedResults.length === 0) {
+      console.log('[Fallback] No matches found for query:', query, '. Returning all local mock books.');
+      return localMockBooks;
+    }
+
+    return combinedResults;
   }
 }
+
