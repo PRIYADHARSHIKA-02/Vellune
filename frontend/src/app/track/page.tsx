@@ -6,15 +6,83 @@ import { useBooks, useSessions } from '../../hooks/queries';
 import { MapPin, Smile, Clock, Calendar, BarChart, Play } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 
+const AMBIENT_SOUNDS = [
+  { id: 'rain', name: 'Autumn Rain', icon: '🌧️', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3' },
+  { id: 'cafe', name: 'Cozy Cafe', icon: '☕', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3' },
+  { id: 'woods', name: 'Deep Woods', icon: '🌲', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3' },
+  { id: 'lofi', name: 'Lo-Fi Beats', icon: '🎧', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' },
+];
+
 export default function TrackPage() {
   const { 
-    activeSession, startReadingSession, cancelReadingSession 
+    activeSession, startReadingSession, cancelReadingSession, setSelectedBookIdForDetail
   } = useStore();
 
   const [selectedBookId, setSelectedBookId] = useState('');
   const [location, setLocation] = useState('Home');
   const [moodBefore, setMoodBefore] = useState('focused');
   const [secondsElapsed, setSecondsElapsed] = useState(0);
+
+  // Cozy Ambient Mixer state
+  const [playingTracks, setPlayingTracks] = useState<Record<string, boolean>>({});
+  const [volumes, setVolumes] = useState<Record<string, number>>({
+    rain: 0.5,
+    cafe: 0.5,
+    woods: 0.5,
+    lofi: 0.5,
+  });
+  const [audioElements, setAudioElements] = useState<Record<string, HTMLAudioElement>>({});
+
+  const togglePlayTrack = (trackId: string) => {
+    const isPlaying = !playingTracks[trackId];
+    setPlayingTracks(prev => ({ ...prev, [trackId]: isPlaying }));
+
+    let audio = audioElements[trackId];
+    if (!audio) {
+      const track = AMBIENT_SOUNDS.find(t => t.id === trackId);
+      if (track) {
+        audio = new Audio(track.url);
+        audio.loop = true;
+        audio.volume = volumes[trackId];
+        setAudioElements(prev => ({ ...prev, [trackId]: audio }));
+      }
+    }
+
+    if (audio) {
+      if (isPlaying) {
+        audio.play().catch(err => console.error('Audio play failed:', err));
+      } else {
+        audio.pause();
+      }
+    }
+  };
+
+  const handleVolumeChange = (trackId: string, volume: number) => {
+    setVolumes(prev => ({ ...prev, [trackId]: volume }));
+    const audio = audioElements[trackId];
+    if (audio) {
+      audio.volume = volume;
+    }
+  };
+
+  // Pause audio on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(audioElements).forEach(audio => {
+        audio.pause();
+      });
+    };
+  }, [audioElements]);
+
+  // Pause audio when session ends
+  useEffect(() => {
+    if (!activeSession) {
+      Object.values(audioElements).forEach(audio => {
+        audio.pause();
+      });
+      setPlayingTracks({});
+    }
+  }, [activeSession, audioElements]);
 
   // Queries
   const { data: books = [], isLoading: isBooksLoading } = useBooks();
@@ -159,54 +227,119 @@ export default function TrackPage() {
 
       {activeSession && activeBook ? (
         /* Active Timer View */
-        <div className="glass" style={{ padding: '2.5rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem', border: '1px solid rgba(99,102,241,0.3)', boxShadow: 'var(--shadow-glow)' }}>
-          <div>
-            <span className="status-pill" style={{ background: 'rgba(99, 102, 241, 0.12)', color: 'var(--accent-primary)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Active Reading Session
-            </span>
-            <h2 style={{ fontSize: '1.8rem', marginTop: '0.5rem', fontFamily: 'var(--font-display)' }}>{activeBook.title}</h2>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>by {activeBook.author}</p>
-          </div>
-
-          <img 
-            src={activeBook.coverUrl || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=100'} 
-            alt={activeBook.title} 
-            style={{ width: '100px', height: '150px', borderRadius: '8px', objectFit: 'cover', boxShadow: '0 10px 20px rgba(0,0,0,0.4)' }}
-            onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=100' }}
-          />
-
-          <div style={{ margin: '0.5rem 0' }}>
-            <div style={{ fontSize: '3rem', fontWeight: 800, fontFamily: 'monospace', color: 'var(--text-primary)', letterSpacing: '0.02em' }}>
-              {formatTime(secondsElapsed)}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '2rem', alignItems: 'stretch' }}>
+          
+          {/* Main Active Timer Box */}
+          <div className="glass" style={{ padding: '2.5rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1.5rem', border: '1px solid rgba(99,102,241,0.3)', boxShadow: 'var(--shadow-glow)' }}>
+            <div>
+              <span className="status-pill" style={{ background: 'rgba(99, 102, 241, 0.12)', color: 'var(--accent-primary)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Active Reading Session
+              </span>
+              <h2 style={{ fontSize: '1.8rem', marginTop: '0.5rem', fontFamily: 'var(--font-display)' }}>{activeBook.title}</h2>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>by {activeBook.author}</p>
             </div>
-            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}><MapPin size={12} /> {activeSession.location}</span>
-              <span>•</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}><Smile size={12} /> Feeling {activeSession.moodBefore}</span>
+
+            <img 
+              src={activeBook.coverUrl || 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=100'} 
+              alt={activeBook.title} 
+              style={{ width: '100px', height: '150px', borderRadius: '8px', objectFit: 'cover', boxShadow: '0 10px 20px rgba(0,0,0,0.4)' }}
+              onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=100' }}
+            />
+
+            <div style={{ margin: '0.5rem 0' }}>
+              <div style={{ fontSize: '3rem', fontWeight: 800, fontFamily: 'monospace', color: 'var(--text-primary)', letterSpacing: '0.02em' }}>
+                {formatTime(secondsElapsed)}
+              </div>
+              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}><MapPin size={12} /> {activeSession.location}</span>
+                <span>•</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}><Smile size={12} /> Feeling {activeSession.moodBefore}</span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <button 
+                className="btn btn-secondary" 
+                style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--color-dnf)', borderColor: 'rgba(239,68,68,0.2)' }}
+                onClick={() => {
+                  if (confirm('Cancel this reading session? Your progress will not be logged.')) cancelReadingSession();
+                }}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn btn-primary"
+                style={{ boxShadow: 'var(--shadow-glow)' }}
+                onClick={() => {
+                  const btn = document.querySelector('.active-tracker-bar button.btn-primary') as HTMLButtonElement;
+                  if (btn) btn.click();
+                }}
+              >
+                Stop & Log Progress
+              </button>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '1rem' }}>
-            <button 
-              className="btn btn-secondary" 
-              style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--color-dnf)', borderColor: 'rgba(239,68,68,0.2)' }}
-              onClick={() => {
-                if (confirm('Cancel this reading session? Your progress will not be logged.')) cancelReadingSession();
-              }}
-            >
-              Cancel
-            </button>
-            <button 
-              className="btn btn-primary"
-              style={{ boxShadow: 'var(--shadow-glow)' }}
-              onClick={() => {
-                const btn = document.querySelector('.active-tracker-bar button.btn-primary') as HTMLButtonElement;
-                if (btn) btn.click();
-              }}
-            >
-              Stop & Log Progress
-            </button>
+          {/* Cozy Ambient Mixer Box */}
+          <div className="glass" style={{ padding: '2.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem', border: '1px solid var(--border-glass)', justifyContent: 'center' }}>
+            <div>
+              <h3 style={{ fontSize: '1.25rem', fontFamily: 'var(--font-display)', margin: 0, color: 'var(--accent-primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                🎧 Cozy Ambient Mixer
+              </h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', marginTop: '0.25rem' }}>
+                Mix background soundscapes to create your perfect reading sanctuary.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', margin: '0.5rem 0' }}>
+              {AMBIENT_SOUNDS.map(track => {
+                const isPlaying = playingTracks[track.id] || false;
+                const volume = volumes[track.id];
+                return (
+                  <div key={track.id} style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.75rem 1rem', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
+                    <span style={{ fontSize: '1.5rem' }}>{track.icon}</span>
+                    <div style={{ flexGrow: 1, minWidth: 0 }}>
+                      <div className="flex-between" style={{ marginBottom: '0.25rem' }}>
+                        <span style={{ fontSize: '0.88rem', fontWeight: 700 }}>{track.name}</span>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{Math.round(volume * 100)}%</span>
+                      </div>
+                      <input 
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={volume}
+                        onChange={(e) => handleVolumeChange(track.id, parseFloat(e.target.value))}
+                        style={{ width: '100%', height: '4px', cursor: 'pointer', accentColor: 'var(--accent-primary)' }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{
+                        padding: '0.4rem 0.8rem',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        backgroundColor: isPlaying ? 'var(--accent-primary)' : 'rgba(255, 255, 255, 0.05)',
+                        color: isPlaying ? '#091A1E' : 'var(--text-primary)',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        borderRadius: '4px',
+                        transition: 'all 0.2s ease',
+                      }}
+                      onClick={() => togglePlayTrack(track.id)}
+                    >
+                      {isPlaying ? 'PAUSE' : 'PLAY'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            
+            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: 0, textAlign: 'center' }}>
+              💡 Adjust volumes of multiple tracks to mix rain with lo-fi beats!
+            </p>
           </div>
+
         </div>
       ) : (
         /* Setup / History View */
@@ -301,7 +434,18 @@ export default function TrackPage() {
                     <div key={session.id} className="glass" style={{ padding: '1.25rem' }}>
                       <div className="flex-between" style={{ marginBottom: '0.5rem' }}>
                         <div>
-                          <h4 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0 }}>
+                          <h4 
+                            style={{ 
+                              fontSize: '0.95rem', 
+                              fontWeight: 700, 
+                              margin: 0,
+                              cursor: book ? 'pointer' : 'default',
+                              color: book ? 'var(--accent-primary)' : 'var(--text-primary)',
+                            }}
+                            onClick={() => book && setSelectedBookIdForDetail(book.id)}
+                            onMouseEnter={(e) => { if (book) e.currentTarget.style.textDecoration = 'underline'; }}
+                            onMouseLeave={(e) => { if (book) e.currentTarget.style.textDecoration = 'none'; }}
+                          >
                             {book ? book.title : 'Deleted Book'}
                           </h4>
                           <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
@@ -321,9 +465,17 @@ export default function TrackPage() {
                       </div>
 
                       {session.notes && (
-                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontStyle: 'italic', borderLeft: '2px solid var(--accent-primary)', paddingLeft: '0.5rem', margin: '0.5rem 0 0 0' }}>
-                          &ldquo;{session.notes}&rdquo;
-                        </p>
+                        <div 
+                          style={{ 
+                            fontSize: '0.85rem', 
+                            color: 'var(--text-secondary)', 
+                            fontStyle: 'italic', 
+                            borderLeft: '2px solid var(--accent-primary)', 
+                            paddingLeft: '0.5rem', 
+                            margin: '0.5rem 0 0 0' 
+                          }}
+                          dangerouslySetInnerHTML={{ __html: session.notes }}
+                        />
                       )}
                     </div>
                   );
