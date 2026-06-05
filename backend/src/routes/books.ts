@@ -301,6 +301,18 @@ router.patch('/:id', authMiddleware, async (req, res) => {
       updatedAt: new Date()
     };
 
+    // Parse date fields passed as strings from the client
+    if (updates.dateFinished !== undefined) {
+      payload.dateFinished = updates.dateFinished ? new Date(updates.dateFinished) : null;
+    }
+    if (updates.dateStarted !== undefined) {
+      payload.dateStarted = updates.dateStarted ? new Date(updates.dateStarted) : null;
+    }
+    if (updates.publishedDate !== undefined) {
+      payload.publishedDate = updates.publishedDate ? new Date(updates.publishedDate) : null;
+    }
+
+
     // Calculate progress
     const pages = updates.pageCount !== undefined ? parseInt(updates.pageCount) : existing.pageCount;
     const current = (updates.currentPage !== undefined ? parseInt(updates.currentPage) : existing.currentPage) || 0;

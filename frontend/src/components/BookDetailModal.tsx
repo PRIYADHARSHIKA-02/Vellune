@@ -218,8 +218,8 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
     fetchPrices();
   }, [book]);
 
-  // Reviews Hook (only fetch for external books, not shelf books)
-  const { data: reviewsResponse, isLoading: isReviewsLoading } = useBookReviews(!isShelfBook ? (book?.isbn || book?.id || null) : null, selectedSource === 'All' ? undefined : selectedSource);
+  // Reviews Hook (fetch for both shelf and external books)
+  const { data: reviewsResponse, isLoading: isReviewsLoading } = useBookReviews(book?.id || book?.isbn || null, selectedSource === 'All' ? undefined : selectedSource);
 
   // Edit Book Form setup
   const editBookBaseSchema = z.object({
@@ -279,12 +279,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
     }
   }, [shelfBook, editBookForm]);
 
-  // Reset tab to 'about' if it's a shelf book and activeTab is 'reviews'
-  useEffect(() => {
-    if (isShelfBook && activeTab === 'reviews') {
-      setActiveTab('about');
-    }
-  }, [isShelfBook, activeTab]);
+
 
   // Note form
   const noteForm = useForm<NoteFormValues>({
@@ -632,15 +627,13 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
           >
             About
           </button>
-          {!isShelfBook && (
-            <button 
-              className={`btn-text ${activeTab === 'reviews' ? 'active' : ''}`}
-              onClick={() => setActiveTab('reviews')}
-              style={{ borderBottom: activeTab === 'reviews' ? '2px solid var(--accent-primary)' : 'none', borderRadius: 0, padding: '0.75rem 0', fontWeight: 600 }}
-            >
-              Reviews ({totalRatingCount > 1000 ? 'Curated' : reviewsResponse?.reviews.length || 0})
-            </button>
-          )}
+          <button 
+            className={`btn-text ${activeTab === 'reviews' ? 'active' : ''}`}
+            onClick={() => setActiveTab('reviews')}
+            style={{ borderBottom: activeTab === 'reviews' ? '2px solid var(--accent-primary)' : 'none', borderRadius: 0, padding: '0.75rem 0', fontWeight: 600 }}
+          >
+            Reviews ({totalRatingCount > 1000 ? 'Curated' : reviewsResponse?.reviews.length || 0})
+          </button>
           <button 
             className={`btn-text ${activeTab === 'similar' ? 'active' : ''}`}
             onClick={() => setActiveTab('similar')}
@@ -895,11 +888,26 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
                         )}
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                           {bookSessions.map(s => (
-                            <div key={s.id} className="glass" style={{ padding: '0.75rem', display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
-                              <div>
-                                <span style={{ fontWeight: 700 }}>{s.pagesRead} pages read</span> in {s.durationMinutes} min
+                            <div key={s.id} className="glass" style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.8rem' }}>
+                              <div className="flex-between">
+                                <div>
+                                  <span style={{ fontWeight: 700 }}>{s.pagesRead} pages read</span> in {s.durationMinutes} min
+                                </div>
+                                <span style={{ color: 'var(--text-muted)' }}>{format(new Date(s.startTime), 'MMM dd, yyyy')}</span>
                               </div>
-                              <span style={{ color: 'var(--text-muted)' }}>{format(new Date(s.startTime), 'MMM dd, yyyy')}</span>
+                              {s.notes && (
+                                <div 
+                                  style={{ 
+                                    fontSize: '0.78rem', 
+                                    color: 'var(--text-secondary)', 
+                                    fontStyle: 'italic', 
+                                    borderLeft: '2px solid var(--accent-primary)', 
+                                    paddingLeft: '0.5rem', 
+                                    marginTop: '0.25rem' 
+                                  }}
+                                  dangerouslySetInnerHTML={{ __html: s.notes }}
+                                />
+                              )}
                             </div>
                           ))}
                         </div>

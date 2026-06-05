@@ -47,188 +47,210 @@ router.get('/books/:id/reviews', authMiddleware, async (req, res) => {
       bookIsbn = id;
     }
 
-    if (!bookIsbn) {
+    if (!bookIsbn && !targetBookId) {
       return res.status(400).json({ error: 'Valid ISBN or Book ID is required.' });
     }
 
-    // 1. Fetch aggregate statistics
-    const aggregate = await ReviewsService.getCombinedAggregate(bookIsbn, targetBookId || undefined);
+    if (bookIsbn) {
+      // 1. Fetch aggregate statistics
+      const aggregate = await ReviewsService.getCombinedAggregate(bookIsbn, targetBookId || undefined);
 
-    // If not cached or aggregate last updated > 7 days ago, trigger background fetch
-    const expired = aggregate && (Date.now() - new Date(aggregate.lastUpdatedAt).getTime() > 7 * 24 * 60 * 60 * 1000);
-    
-    if (!aggregate || expired) {
-      console.log(`[Reviews Router] Cache miss or expired for ISBN: ${bookIsbn}. Launching background fetch...`);
-      await ReviewQueueService.addReviewFetchJob(bookIsbn, targetBookId || undefined);
+      // If not cached or aggregate last updated > 7 days ago, trigger background fetch
+      const expired = aggregate && (Date.now() - new Date(aggregate.lastUpdatedAt).getTime() > 7 * 24 * 60 * 60 * 1000);
       
-      // If we already have some cached data, we can serve it while refreshing in background.
-      // Otherwise, return "fetching" status so the frontend shows skeleton loaders.
-      if (!aggregate) {
-        // Find if user already has a review for their book
-        let userReview = null;
-        if (targetBookId) {
+      if (!aggregate || expired) {
+        console.log(`[Reviews Router] Cache miss or expired for ISBN: ${bookIsbn}. Launching background fetch...`);
+        await ReviewQueueService.addReviewFetchJob(bookIsbn, targetBookId || undefined);
+        
+        // If we already have some cached data, we can serve it while refreshing in background.
+        // Otherwise, return "fetching" status so the frontend shows skeleton loaders.
+        if (!aggregate) {
+          // Find if user already has a review for their book
+          let userReview = null;
+          if (targetBookId) {
+            userReview = await db.query.userBookReviews.findFirst({
+              where: and(
+                eq(userBookReviews.bookId, targetBookId),
+                eq(userBookReviews.userId, tokenUser.id),
+                isNull(userBookReviews.deletedAt)
+              )
+            });
+          }
+
+          return res.json({
+            status: 'fetching',
+            aggregate: null,
+            sentiment: { positive: 70, neutral: 20, critical: 10 },
+            reviews: [],
+            user_review: userReview
+          });
+        }
+      }
+
+      // 2. Fetch external reviews
+      let extQuery = db.select().from(externalReviews);
+      if (targetBookId) {
+        extQuery.where(
+          dbSourceFilter 
+            ? and(eq(externalReviews.bookId, targetBookId), eq(externalReviews.source, dbSourceFilter))
+            : eq(externalReviews.bookId, targetBookId)
+        );
+      } else {
+        extQuery.where(
+          dbSourceFilter 
+            ? and(eq(externalReviews.isbn, bookIsbn), eq(externalReviews.source, dbSourceFilter))
+            : eq(externalReviews.isbn, bookIsbn)
+        );
+      }
+      const extReviews = await extQuery;
+
+      // 3. Fetch current user's review for this book (if exists)
+      let userReview = null;
+      if (targetBookId) {
+        userReview = await db.query.userBookReviews.findFirst({
+          where: and(
+            eq(userBookReviews.bookId, targetBookId),
+            eq(userBookReviews.userId, tokenUser.id),
+            isNull(userBookReviews.deletedAt)
+          )
+        });
+      } else {
+        // Find the user's book with this ISBN first
+        const userBook = await db.query.books.findFirst({
+          where: and(eq(books.isbn, bookIsbn), eq(books.userId, tokenUser.id))
+        });
+        if (userBook) {
           userReview = await db.query.userBookReviews.findFirst({
             where: and(
-              eq(userBookReviews.bookId, targetBookId),
+              eq(userBookReviews.bookId, userBook.id),
               eq(userBookReviews.userId, tokenUser.id),
               isNull(userBookReviews.deletedAt)
             )
           });
         }
-
-        return res.json({
-          status: 'fetching',
-          aggregate: null,
-          sentiment: { positive: 70, neutral: 20, critical: 10 },
-          reviews: [],
-          user_review: userReview
-        });
       }
-    }
 
-    // 2. Fetch external reviews
-    let extQuery = db.select().from(externalReviews);
-    if (targetBookId) {
-      extQuery.where(
-        dbSourceFilter 
-          ? and(eq(externalReviews.bookId, targetBookId), eq(externalReviews.source, dbSourceFilter))
-          : eq(externalReviews.bookId, targetBookId)
-      );
-    } else {
-      extQuery.where(
-        dbSourceFilter 
-          ? and(eq(externalReviews.isbn, bookIsbn), eq(externalReviews.source, dbSourceFilter))
-          : eq(externalReviews.isbn, bookIsbn)
-      );
-    }
-    const extReviews = await extQuery;
+      // 4. Fetch Reading Circle Friend reviews (Your friends tab)
+      // Find all reading circles this user is a member of
+      const userCircles = await db.query.circleMembers.findMany({
+        where: eq(circleMembers.userId, tokenUser.id)
+      });
+      
+      let friendReviews: any[] = [];
+      if (userCircles.length > 0) {
+        const circleIds = userCircles.map(c => c.circleId);
+        
+        // Find all fellow members in those circles
+        const fellowMembers = await db.query.circleMembers.findMany({
+          where: and(
+            inArray(circleMembers.circleId, circleIds),
+            ne(circleMembers.userId, tokenUser.id)
+          )
+        });
+        
+        if (fellowMembers.length > 0) {
+          const friendUserIds = Array.from(new Set(fellowMembers.map(m => m.userId)));
+          
+          // Find their shared reviews for books matching this ISBN
+          const rawFriendReviews = await db.select({
+            id: userBookReviews.id,
+            userId: userBookReviews.userId,
+            starRating: userBookReviews.starRating,
+            moodTags: userBookReviews.moodTags,
+            recommend: userBookReviews.recommend,
+            reviewText: userBookReviews.reviewText,
+            isShared: userBookReviews.isShared,
+            createdAt: userBookReviews.createdAt,
+            updatedAt: userBookReviews.updatedAt,
+            bookId: userBookReviews.bookId,
+          })
+          .from(userBookReviews)
+          .innerJoin(books, eq(userBookReviews.bookId, books.id))
+          .where(
+            and(
+              inArray(userBookReviews.userId, friendUserIds),
+              eq(books.isbn, bookIsbn),
+              eq(userBookReviews.isShared, true),
+              isNull(userBookReviews.deletedAt)
+            )
+          );
 
-    // 3. Fetch current user's review for this book (if exists)
-    let userReview = null;
-    if (targetBookId) {
-      userReview = await db.query.userBookReviews.findFirst({
-        where: and(
-          eq(userBookReviews.bookId, targetBookId),
-          eq(userBookReviews.userId, tokenUser.id),
-          isNull(userBookReviews.deletedAt)
-        )
+          friendReviews = rawFriendReviews.map(r => ({
+            ...r,
+            source: 'Your friends',
+            reviewerType: 'community',
+            starRating: r.starRating,
+            excerpt: r.reviewText || '',
+            helpfulVotes: 0,
+          }));
+        }
+      }
+
+      // 5. Combine and Sort reviews as requested:
+      // Default "All" horizontal scrollable filter:
+      // - Editorial reviews (NYT, Guardian, etc.) first, max 2
+      // - Highest-upvoted Goodreads/LibraryThing reviews next, 3-4
+      // - Most recent user reviews (internal/friends) last
+      let combinedReviews: any[] = [];
+
+      // Map external reviews to display format
+      const formattedExt = extReviews.map(r => ({
+        id: r.id,
+        source: r.source,
+        starRating: r.starRating ? parseFloat(r.starRating) : null,
+        excerpt: r.excerpt,
+        reviewerType: r.reviewerType,
+        helpfulVotes: r.helpfulVotes || 0,
+        sourceUrl: r.sourceUrl,
+        createdAt: r.fetchedAt
+      }));
+
+      if (extSource === 'Your friends') {
+        combinedReviews = friendReviews;
+      } else if (extSource && extSource !== 'all') {
+        combinedReviews = formattedExt.filter(r => r.source === extSource);
+      } else {
+        // Default "All" curated mix
+        const editorials = formattedExt.filter(r => r.reviewerType === 'editorial').slice(0, 2);
+        const community = formattedExt.filter(r => r.reviewerType === 'community')
+          .sort((a, b) => b.helpfulVotes - a.helpfulVotes)
+          .slice(0, 4);
+        
+        combinedReviews = [...editorials, ...community, ...friendReviews];
+      }
+
+      return res.json({
+        status: 'success',
+        aggregate,
+        sentiment: {
+          positive: aggregate.positivePct,
+          neutral: aggregate.neutralPct,
+          critical: aggregate.criticalPct
+        },
+        reviews: combinedReviews,
+        user_review: userReview
       });
     } else {
-      // Find the user's book with this ISBN first
-      const userBook = await db.query.books.findFirst({
-        where: and(eq(books.isbn, bookIsbn), eq(books.userId, tokenUser.id))
-      });
-      if (userBook) {
+      // Local-only reviews (No ISBN available)
+      let userReview = null;
+      if (targetBookId) {
         userReview = await db.query.userBookReviews.findFirst({
           where: and(
-            eq(userBookReviews.bookId, userBook.id),
+            eq(userBookReviews.bookId, targetBookId),
             eq(userBookReviews.userId, tokenUser.id),
             isNull(userBookReviews.deletedAt)
           )
         });
       }
-    }
 
-    // 4. Fetch Reading Circle Friend reviews (Your friends tab)
-    // Find all reading circles this user is a member of
-    const userCircles = await db.query.circleMembers.findMany({
-      where: eq(circleMembers.userId, tokenUser.id)
-    });
-    
-    let friendReviews: any[] = [];
-    if (userCircles.length > 0) {
-      const circleIds = userCircles.map(c => c.circleId);
-      
-      // Find all fellow members in those circles
-      const fellowMembers = await db.query.circleMembers.findMany({
-        where: and(
-          inArray(circleMembers.circleId, circleIds),
-          ne(circleMembers.userId, tokenUser.id)
-        )
+      return res.json({
+        status: 'success',
+        aggregate: null,
+        sentiment: { positive: 0, neutral: 0, critical: 0 },
+        reviews: [],
+        user_review: userReview
       });
-      
-      if (fellowMembers.length > 0) {
-        const friendUserIds = Array.from(new Set(fellowMembers.map(m => m.userId)));
-        
-        // Find their shared reviews for books matching this ISBN
-        const rawFriendReviews = await db.select({
-          id: userBookReviews.id,
-          userId: userBookReviews.userId,
-          starRating: userBookReviews.starRating,
-          moodTags: userBookReviews.moodTags,
-          recommend: userBookReviews.recommend,
-          reviewText: userBookReviews.reviewText,
-          isShared: userBookReviews.isShared,
-          createdAt: userBookReviews.createdAt,
-          updatedAt: userBookReviews.updatedAt,
-          bookId: userBookReviews.bookId,
-        })
-        .from(userBookReviews)
-        .innerJoin(books, eq(userBookReviews.bookId, books.id))
-        .where(
-          and(
-            inArray(userBookReviews.userId, friendUserIds),
-            eq(books.isbn, bookIsbn),
-            eq(userBookReviews.isShared, true),
-            isNull(userBookReviews.deletedAt)
-          )
-        );
-
-        friendReviews = rawFriendReviews.map(r => ({
-          ...r,
-          source: 'Your friends',
-          reviewerType: 'community',
-          starRating: r.starRating,
-          excerpt: r.reviewText || '',
-          helpfulVotes: 0,
-        }));
-      }
     }
-
-    // 5. Combine and Sort reviews as requested:
-    // Default "All" horizontal scrollable filter:
-    // - Editorial reviews (NYT, Guardian, etc.) first, max 2
-    // - Highest-upvoted Goodreads/LibraryThing reviews next, 3-4
-    // - Most recent user reviews (internal/friends) last
-    let combinedReviews: any[] = [];
-
-    // Map external reviews to display format
-    const formattedExt = extReviews.map(r => ({
-      id: r.id,
-      source: r.source,
-      starRating: r.starRating ? parseFloat(r.starRating) : null,
-      excerpt: r.excerpt,
-      reviewerType: r.reviewerType,
-      helpfulVotes: r.helpfulVotes || 0,
-      sourceUrl: r.sourceUrl,
-      createdAt: r.fetchedAt
-    }));
-
-    if (extSource === 'Your friends') {
-      combinedReviews = friendReviews;
-    } else if (extSource && extSource !== 'all') {
-      combinedReviews = formattedExt.filter(r => r.source === extSource);
-    } else {
-      // Default "All" curated mix
-      const editorials = formattedExt.filter(r => r.reviewerType === 'editorial').slice(0, 2);
-      const community = formattedExt.filter(r => r.reviewerType === 'community')
-        .sort((a, b) => b.helpfulVotes - a.helpfulVotes)
-        .slice(0, 4);
-      
-      combinedReviews = [...editorials, ...community, ...friendReviews];
-    }
-
-    return res.json({
-      status: 'success',
-      aggregate,
-      sentiment: {
-        positive: aggregate.positivePct,
-        neutral: aggregate.neutralPct,
-        critical: aggregate.criticalPct
-      },
-      reviews: combinedReviews,
-      user_review: userReview
-    });
 
   } catch (error: any) {
     console.error('Fetch book reviews error:', error);
