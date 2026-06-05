@@ -156,6 +156,128 @@ export default function StatsPage() {
     });
   };
 
+  // --- BADGES CALCULATION ---
+  // 1. Tome Explorer (Bronze): Log first reading session
+  const hasTomeExplorer = sessions.length > 0;
+
+  // 2. Night Owl (Silver): Log a session between 10 PM (22:00) and 4 AM (4:00)
+  const hasNightOwl = sessions.some(s => {
+    const hour = new Date(s.startTime).getHours();
+    return hour >= 22 || hour < 4;
+  });
+
+  // 3. Early Bird (Silver): Log a session between 5 AM and 9 AM
+  const hasEarlyBird = sessions.some(s => {
+    const hour = new Date(s.startTime).getHours();
+    return hour >= 5 && hour < 9;
+  });
+
+  // 4. Bookworm (Gold): Complete at least 5 books
+  const totalFinishedBooks = books.filter(b => b.status === 'finished').length;
+  const hasBookworm = totalFinishedBooks >= 5;
+
+  // 5. Speed Demon (Gold): Read more than 50 pages in a single session
+  const hasSpeedDemon = sessions.some(s => s.pagesRead > 50);
+
+  // 6. Streak Master (Gold): Active streak of 3+ days
+  const calculateStreak = () => {
+    if (sessions.length === 0) return 0;
+    const uniqueSessionDates = Array.from(new Set(
+      sessions.map(s => new Date(s.startTime).toDateString())
+    )).map(d => new Date(d));
+    uniqueSessionDates.sort((a, b) => b.getTime() - a.getTime());
+    let streak = 0;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const firstSessionDate = uniqueSessionDates[0];
+    if (firstSessionDate.getTime() < yesterday.getTime()) {
+      return 0; // Streak broken
+    }
+    const expectedDate = new Date(firstSessionDate);
+    for (let i = 0; i < uniqueSessionDates.length; i++) {
+      if (uniqueSessionDates[i].getTime() === expectedDate.getTime()) {
+        streak++;
+        expectedDate.setDate(expectedDate.getDate() - 1);
+      } else {
+        break;
+      }
+    }
+    return streak;
+  };
+  const streakCount = calculateStreak();
+  const hasStreakMaster = streakCount >= 3;
+
+  // 7. Dedicated Scholar (Gold): Write 10 or more notes/quotes
+  const hasDedicatedScholar = notes.length >= 10;
+
+  const BADGES = [
+    {
+      id: 'explorer',
+      name: 'Tome Explorer',
+      description: 'Log your very first reading session to start your journey.',
+      icon: '🧭',
+      tier: 'Bronze',
+      unlocked: hasTomeExplorer,
+      requirement: '1 logged reading session'
+    },
+    {
+      id: 'night_owl',
+      name: 'Night Owl',
+      description: 'Log a reading session late at night between 10 PM and 4 AM.',
+      icon: '🦉',
+      tier: 'Silver',
+      unlocked: hasNightOwl,
+      requirement: 'Session logged between 10 PM - 4 AM'
+    },
+    {
+      id: 'early_bird',
+      name: 'Early Bird',
+      description: 'Log a reading session early in the morning between 5 AM and 9 AM.',
+      icon: '🌅',
+      tier: 'Silver',
+      unlocked: hasEarlyBird,
+      requirement: 'Session logged between 5 AM - 9 AM'
+    },
+    {
+      id: 'bookworm',
+      name: 'Bookworm',
+      description: 'Complete 5 or more books in your Vellune library.',
+      icon: '🐛',
+      tier: 'Gold',
+      unlocked: hasBookworm,
+      requirement: `Finish 5 books (Current: ${totalFinishedBooks}/5)`
+    },
+    {
+      id: 'speed_demon',
+      name: 'Speed Demon',
+      description: 'Read more than 50 pages in a single reading session.',
+      icon: '⚡',
+      tier: 'Gold',
+      unlocked: hasSpeedDemon,
+      requirement: '50+ pages read in one session'
+    },
+    {
+      id: 'streak_master',
+      name: 'Streak Master',
+      description: 'Maintain an active reading streak of 3 or more consecutive days.',
+      icon: '🔥',
+      tier: 'Gold',
+      unlocked: hasStreakMaster,
+      requirement: `3-day reading streak (Current: ${streakCount}/3)`
+    },
+    {
+      id: 'scholar',
+      name: 'Dedicated Scholar',
+      description: 'Write 10 or more notes, quotes, or bookmarks in your books.',
+      icon: '✍️',
+      tier: 'Gold',
+      unlocked: hasDedicatedScholar,
+      requirement: `Write 10 notes/quotes (Current: ${notes.length}/10)`
+    }
+  ];
+
   // SVG Chart: Pages Read monthly bar chart
   const renderActivityChart = () => {
     const maxVal = Math.max(...weeklyPages, 100);
@@ -475,6 +597,73 @@ export default function StatsPage() {
             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>To Read (TBR) list</div>
             <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '0.15rem' }}>{toReadBooks.length} books</div>
           </div>
+        </div>
+      </div>
+
+      {/* Achievements & Reading Badges */}
+      <div className="glass" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div>
+          <h3 style={{ fontSize: '1.15rem', fontFamily: 'var(--font-display)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <Award size={18} style={{ color: 'var(--accent-primary)' }} /> Achievements & Badges
+          </h3>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginTop: '0.2rem' }}>
+            Unlock achievements by building consistent reading and note-taking habits.
+          </p>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '1rem', marginTop: '0.5rem' }}>
+          {BADGES.map(badge => (
+            <div 
+              key={badge.id}
+              className="card-hover"
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '1rem',
+                borderRadius: '8px',
+                background: badge.unlocked ? 'rgba(212, 178, 111, 0.02)' : 'rgba(255,255,255,0.01)',
+                border: badge.unlocked ? '1px solid rgba(212, 178, 111, 0.25)' : '1px solid var(--border-glass)',
+                textAlign: 'center',
+                transition: 'all 0.2s ease',
+                position: 'relative'
+              }}
+              title={`${badge.name} (${badge.tier}): ${badge.description} - Requirement: ${badge.requirement}`}
+            >
+              <div 
+                style={{ 
+                  fontSize: '2rem', 
+                  filter: badge.unlocked ? 'none' : 'grayscale(100%)',
+                  opacity: badge.unlocked ? 1 : 0.4,
+                  transition: 'all 0.2s ease',
+                  marginBottom: '0.5rem'
+                }}
+              >
+                {badge.icon}
+              </div>
+              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: badge.unlocked ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                {badge.name}
+              </span>
+              <span 
+                style={{ 
+                  fontSize: '0.62rem', 
+                  padding: '0.15rem 0.35rem', 
+                  borderRadius: '4px', 
+                  background: badge.unlocked 
+                    ? badge.tier === 'Gold' ? 'rgba(212,178,111,0.15)' : badge.tier === 'Silver' ? 'rgba(255,255,255,0.08)' : 'rgba(205,127,50,0.15)' 
+                    : 'rgba(255,255,255,0.03)',
+                  color: badge.unlocked 
+                    ? badge.tier === 'Gold' ? 'var(--accent-primary)' : badge.tier === 'Silver' ? 'var(--text-secondary)' : '#cd7f32' 
+                    : 'var(--text-muted)',
+                  marginTop: '0.35rem',
+                  fontWeight: 700
+                }}
+              >
+                {badge.unlocked ? badge.tier : 'LOCKED'}
+              </span>
+            </div>
+          ))}
         </div>
       </div>
 
