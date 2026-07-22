@@ -10,9 +10,9 @@ import authRouter from './routes/auth.js';
 import booksRouter from './routes/books.js';
 import sessionsRouter from './routes/sessions.js';
 import notesRouter from './routes/notes.js';
-import circlesRouter from './routes/circles.js';
+import circlesRouter from './routes/circles.routes.js';
 import shelvesRouter from './routes/shelves.js';
-import invitationsRouter from './routes/invitations.js';
+import invitationsRouter from './routes/invitations.routes.js';
 import reviewsRouter from './routes/reviews.js';
 
 dotenv.config();
