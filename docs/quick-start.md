@@ -34,7 +34,7 @@ npm run db:push
 npm run dev
 ```
 
-* The backend API server will run at `http://localhost:3000`.
+* The backend API server will run at `http://localhost:3001`.
 
 ---
 
@@ -48,4 +48,4 @@ npm install
 npm run dev
 ```
 
-* The Next.js client application will boot at `http://localhost:3001`.
+* The Next.js client application will boot at `http://localhost:3000`.

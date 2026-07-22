@@ -68,7 +68,7 @@ docker compose up -d
 
 2. Configure Environment Variables (`frontend/.env.local`):
    ```env
-   NEXT_PUBLIC_API_URL=http://localhost:3000/api/v1
+   NEXT_PUBLIC_API_URL=http://localhost:3001/api/v1
    ```
 
 3. Boot Next.js Dev Server:
