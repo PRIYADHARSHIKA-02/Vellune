@@ -8,7 +8,7 @@ dotenv.config();
 const connectionString = process.env.DATABASE_URL || 'postgresql://admin:secret_password_123@localhost:5433/vellune_db';
 
 // For postgres-js, we initialize the connection client
-const client = postgres(connectionString, { 
+export const client = postgres(connectionString, { 
   max: 10,
   idle_timeout: 20,
   connect_timeout: 10,

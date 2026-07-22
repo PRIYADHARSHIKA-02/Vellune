@@ -104,12 +104,12 @@ export const readingCircles = pgTable('reading_circles', {
   description: text('description'),
   creatorId: uuid('creator_id').references(() => users.id, { onDelete: 'set null' }),
   currentBookId: uuid('current_book_id').references(() => books.id, { onDelete: 'set null' }),
-  type: varchar('type', { length: 50 }).default('same_book').notNull(), // 'same_book' | 'different_books'
-  isPrivate: boolean('is_private').default(true),
-  inviteCode: varchar('invite_code', { length: 50 }).unique(),
-  maxMembers: integer('max_members').default(10),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  type: varchar('type', { length: 20 }).default('same_book').notNull(), // 'same_book' | 'different_books'
+  isPrivate: boolean('is_private').default(true).notNull(),
+  inviteCode: varchar('invite_code', { length: 12 }).unique().notNull(),
+  maxMembers: integer('max_members').default(10).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Circle Members Table
@@ -118,25 +118,25 @@ export const circleMembers = pgTable('circle_members', {
   circleId: uuid('circle_id').references(() => readingCircles.id, { onDelete: 'cascade' }).notNull(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   role: varchar('role', { length: 20 }).default('member').notNull(), // 'admin', 'moderator', 'member'
-  currentProgress: integer('current_progress').default(0),
-  joinedAt: timestamp('joined_at', { withTimezone: true }).defaultNow(),
-  notificationPreference: varchar('notification_preference', { length: 50 }).default('daily').notNull(), // 'all', 'daily', 'mute'
-  muteUntilChapter: integer('mute_until_chapter'),
-});
+  currentProgress: integer('current_progress').default(0).notNull(),
+  joinedAt: timestamp('joined_at', { withTimezone: true }).defaultNow().notNull(),
+  notificationPreference: varchar('notification_preference', { length: 20 }).default('digest').notNull(), // 'all', 'digest', 'muted', 'mute_until_page'
+  muteUntilPage: integer('mute_until_page'),
+}, (t) => ({
+  unq: unique().on(t.circleId, t.userId),
+}));
 
 // Discussion Threads Table
 export const discussionThreads = pgTable('discussion_threads', {
   id: uuid('id').defaultRandom().primaryKey(),
   circleId: uuid('circle_id').references(() => readingCircles.id, { onDelete: 'cascade' }).notNull(),
-  bookId: uuid('book_id').references(() => books.id, { onDelete: 'cascade' }),
+  bookId: uuid('book_id').references(() => books.id, { onDelete: 'set null' }),
   creatorId: uuid('creator_id').references(() => users.id, { onDelete: 'set null' }),
   title: varchar('title', { length: 255 }).notNull(),
-  spoilerLevel: integer('spoiler_level').default(0),
-  chapter: varchar('chapter', { length: 100 }),
   chapterTag: varchar('chapter_tag', { length: 100 }),
-  spoilerLevelPage: integer('spoiler_level_page'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  spoilerPage: integer('spoiler_page').default(0).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Discussion Posts Table
@@ -145,25 +145,25 @@ export const discussionPosts = pgTable('discussion_posts', {
   threadId: uuid('thread_id').references(() => discussionThreads.id, { onDelete: 'cascade' }).notNull(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   content: text('content').notNull(),
-  parentPostId: uuid('parent_post_id'), // recursive references handled in relations
-  reactions: jsonb('reactions').default({}), // {"like": 2, "insightful": 1}
-  chapterTag: varchar('chapter_tag', { length: 100 }),
-  pageReference: integer('page_reference'),
+  chapterTag: varchar('chapter_tag', { length: 100 }).notNull(),
+  pageReference: integer('page_reference').notNull(),
+  parentPostId: uuid('parent_post_id').references((): any => discussionPosts.id, { onDelete: 'cascade' }), // recursive references handled in relations
+  reactions: jsonb('reactions').default({"insight":0,"feel":0,"think":0,"wow":0,"laugh":0}).notNull(),
   isEdited: boolean('is_edited').default(false).notNull(),
-  editWindowExpiresAt: timestamp('edit_window_expires_at', { withTimezone: true }),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  editExpiresAt: timestamp('edit_expires_at', { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Circle Invitations Table
 export const circleInvitations = pgTable('circle_invitations', {
   id: uuid('id').defaultRandom().primaryKey(),
   circleId: uuid('circle_id').references(() => readingCircles.id, { onDelete: 'cascade' }).notNull(),
-  invitedByUserId: uuid('invited_by_user_id').references(() => users.id, { onDelete: 'set null' }).notNull(),
+  invitedByUserId: uuid('invited_by_user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   invitedUserId: uuid('invited_user_id').references(() => users.id, { onDelete: 'cascade' }),
-  inviteLinkCode: varchar('invite_link_code', { length: 50 }).unique(),
+  inviteCode: varchar('invite_code', { length: 12 }).notNull(),
   status: varchar('status', { length: 20 }).default('pending').notNull(), // 'pending', 'accepted', 'declined', 'expired'
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
@@ -229,6 +229,16 @@ export const userBookReviews = pgTable('user_book_reviews', {
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, (t) => ({
   unq: unique().on(t.userId, t.bookId)
+}));
+
+// Circle Last Seen Table
+export const circleLastSeen = pgTable('circle_last_seen', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  circleId: uuid('circle_id').references(() => readingCircles.id, { onDelete: 'cascade' }).notNull(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  unq: unique().on(t.userId, t.circleId)
 }));
 
 // Define ORM Relations
