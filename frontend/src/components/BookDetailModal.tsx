@@ -1001,7 +1001,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ bookId, onClos
                     </>
                   ) : (
                     <>
-                      <span>You haven't reviewed this book yet.</span>
+                      <span>You haven&apos;t reviewed this book yet.</span>
                       {isShelfBook && shelfBook?.status === 'finished' ? (
                         <button 
                           className="btn btn-text animate-pulse-glow" 

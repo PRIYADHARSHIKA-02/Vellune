@@ -348,7 +348,7 @@ export default function DiscoverPage() {
             </div>
           ) : searchResults.length === 0 ? (
             <div className="glass" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-              <p>No books found for "{debouncedQuery}".</p>
+              <p>No books found for &ldquo;{debouncedQuery}&rdquo;.</p>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>Double check the spelling or try a different term.</p>
             </div>
           ) : (

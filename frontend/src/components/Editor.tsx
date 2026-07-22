@@ -274,7 +274,7 @@ export const Editor: React.FC<EditorProps> = ({ value, onChange, placeholder = '
             <div>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 800, margin: 0, fontFamily: 'var(--font-display)' }}>Scan Page Preview</h3>
               <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-                If the book text is sideways or upside down, rotate it until it's upright for best scanning results.
+                If the book text is sideways or upside down, rotate it until it&apos;s upright for best scanning results.
               </p>
             </div>
 

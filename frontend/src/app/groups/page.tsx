@@ -33,6 +33,10 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { getCrispDescription } from '../../lib/text';
+import { CircleCard } from '../../components/groups/CircleCard';
+import { DiscussionFeed } from '../../components/groups/DiscussionFeed';
+import { PostComposer } from '../../components/groups/PostComposer';
+import { useCircleStore } from '../../store/circles.store';
 
 const calculatePercentage = (progress: number, pageCount: number | null): number => {
   if (!pageCount || pageCount <= 0) return 0;
@@ -44,6 +48,16 @@ export default function GroupsPage() {
   const { data: books = [] } = useBooks();
   const { data: circles = [], isLoading: isCirclesLoading } = useCircles();
   const { data: pendingInvitations = [], isLoading: isInvitesLoading } = useInvitations();
+  const { setCircles, setActiveCircle } = useCircleStore();
+
+  useEffect(() => {
+    if (circles) {
+      const storeCircles = useCircleStore.getState().circles;
+      if (JSON.stringify(storeCircles) !== JSON.stringify(circles)) {
+        setCircles(circles);
+      }
+    }
+  }, [circles, setCircles]);
 
   // Selected Circle & Active Thread View Push
   const [selectedCircleId, setSelectedCircleId] = useState<string | null>(null);
@@ -117,6 +131,24 @@ export default function GroupsPage() {
     return () => clearInterval(timer);
   }, []);
 
+  // Automatically select circle if circleId query parameter is present on load
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const circleIdParam = params.get('circleId');
+      if (circleIdParam) {
+        setSelectedCircleId(circleIdParam);
+        setIsCircleDetailOpen(true);
+        setCircleDetailTab('discussion');
+        
+        // Remove query param from browser URL so it doesn't reopen if the user refreshes
+        const url = new URL(window.location.href);
+        url.searchParams.delete('circleId');
+        window.history.replaceState({}, '', url.toString());
+      }
+    }
+  }, [circles]);
+
   // API mutations
   const addCircleMutation = useAddCircle();
   const joinCircleMutation = useJoinCircle();
@@ -150,6 +182,7 @@ export default function GroupsPage() {
   // Reset states when changing circle
   const handleSelectCircle = (circleId: string) => {
     setSelectedCircleId(circleId);
+    setActiveCircle(circleId);
     setSelectedThreadId(null);
     setIsCircleDetailOpen(true);
     setCircleDetailTab('discussion');
@@ -295,7 +328,6 @@ export default function GroupsPage() {
       setSelectedBook(book);
     }
   };
-
   // Wizard functions
   const handleCreateCircleSubmit = async () => {
     if (!circleName.trim()) return;
@@ -309,10 +341,19 @@ export default function GroupsPage() {
         maxMembers: 10
       });
 
+      // Register the wizard's pre-generated invite link code in the backend database
+      if (shareableInviteCode) {
+        await inviteToCircleMutation.mutateAsync({
+          circleId: circleResponse.circle.id,
+          inviteCode: shareableInviteCode
+        });
+        setShareableInviteCode(null);
+      }
+
       // Dispatch direct invites
       for (const invitee of invitees) {
         await inviteToCircleMutation.mutateAsync({
-          circleId: circleResponse.id,
+          circleId: circleResponse.circle.id,
           username: invitee
         });
       }
@@ -327,13 +368,11 @@ export default function GroupsPage() {
       setIsCreateWizardOpen(false);
 
       // Open detail screen
-      handleSelectCircle(circleResponse.id);
+      handleSelectCircle(circleResponse.circle.id);
     } catch (err: any) {
       alert(err.response?.data?.error || 'Failed to create reading circle.');
     }
-  };
-
-  // Add username to list
+  };  // Add username to list
   const handleAddInvitee = () => {
     if (!inviteUsername.trim()) return;
     if (invitees.includes(inviteUsername.trim())) {
@@ -350,12 +389,13 @@ export default function GroupsPage() {
 
   // Copy shareable code
   const handleGenerateShareLink = async () => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
     if (!selectedCircleId && !addCircleMutation.isSuccess) {
       // In wizard flow, we generate a mock code first or create the circle to share.
       // Let's generate a temporary link using a random string.
       const mockCode = `INV-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
       setShareableInviteCode(mockCode);
-      navigator.clipboard.writeText(`http://vellune.app/invite/${mockCode}`);
+      navigator.clipboard.writeText(`${origin}/invite/${mockCode}`);
       alert('Invite link copied to clipboard!');
       return;
     }
@@ -366,7 +406,7 @@ export default function GroupsPage() {
       });
       if (response.inviteCode) {
         setShareableInviteCode(response.inviteCode);
-        navigator.clipboard.writeText(`http://vellune.app/invite/${response.inviteCode}`);
+        navigator.clipboard.writeText(`${origin}/invite/${response.inviteCode}`);
         alert('Shareable invite link copied to clipboard!');
       }
     } catch (err: any) {
@@ -776,105 +816,49 @@ export default function GroupsPage() {
               {filteredCircles.map((circle: any) => {
                 const isSelected = selectedCircleId === circle.id;
                 return (
-                  <div 
-                    key={circle.id}
-                    onClick={() => handleSelectCircle(circle.id)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setActiveContextMenuCircleId(circle.id);
-                    }}
-                    className={`glass animate-fade-in ${isSelected ? 'glass-glow' : ''}`}
-                    style={{
-                      padding: '1.25rem',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '0.85rem',
-                      border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-glass)',
-                      position: 'relative'
-                    }}
-                  >
+                  <div key={circle.id} style={{ position: 'relative' }}>
+                    <CircleCard
+                      circle={{
+                        id: circle.id,
+                        name: circle.name,
+                        member_count: circle.members?.length || 0,
+                        my_progress: circle.userProgressPercentage || 0,
+                        others_avg_progress: circle.othersAvgPercentage || 0,
+                        unread_post_count: circle.unread_post_count || 0,
+                        book_title: circle.currentBook?.title,
+                        book_cover: circle.currentBook?.coverUrl
+                      }}
+                      onClick={() => handleSelectCircle(circle.id)}
+                    />
                     
-                    {/* Header Row */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', minWidth: 0 }}>
-                        {/* Stacked avatars */}
-                        <div style={{ display: 'flex', alignItems: 'center' }}>
-                          {circle.members?.slice(0, 4).map((member: any, idx: number) => (
-                            <div 
-                              key={member.id} 
-                              style={{
-                                width: '28px',
-                                height: '28px',
-                                borderRadius: '50%',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '0.7rem',
-                                fontWeight: 700,
-                                color: '#fff',
-                                backgroundColor: getAvatarColor(member.user?.username || 'user'),
-                                border: '2px solid var(--bg-primary)',
-                                marginRight: '-8px',
-                                zIndex: 10 - idx
-                              }}
-                              title={member.user?.username}
-                            >
-                              {getInitials(member.user?.username)}
-                            </div>
-                          ))}
-                          {(circle.members?.length || 0) > 4 && (
-                            <div style={{
-                              width: '28px',
-                              height: '28px',
-                              borderRadius: '50%',
-                              backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                              border: '2px solid var(--bg-primary)',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              fontSize: '0.65rem',
-                              fontWeight: 700,
-                              color: 'var(--text-secondary)',
-                              zIndex: 1
-                            }}>
-                              +{circle.members.length - 4}
-                            </div>
-                          )}
-                        </div>
+                    {/* Setting context trigger */}
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveContextMenuCircleId(activeContextMenuCircleId === circle.id ? null : circle.id);
+                      }}
+                      style={{
+                        position: 'absolute',
+                        top: '1.25rem',
+                        right: '1.25rem',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-muted)',
+                        cursor: 'pointer',
+                        zIndex: 10
+                      }}
+                    >
+                      <MoreVertical size={16} />
+                    </button>
 
-                        {/* Name & metadata */}
-                        <div style={{ minWidth: 0 }}>
-                          <h4 style={{ fontSize: '15px', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {circle.name}
-                          </h4>
-                          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                            {circle.members?.length || 1} members · {circle.type === 'same_book' ? 'Shared Book' : 'Individual Books'}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Setting drop triggers */}
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveContextMenuCircleId(activeContextMenuCircleId === circle.id ? null : circle.id);
-                        }}
-                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-                      >
-                        <MoreVertical size={16} />
-                      </button>
-                    </div>
-
-                    {/* Longpress context menu dropdown */}
                     {activeContextMenuCircleId === circle.id && (
                       <div 
                         onClick={(e) => e.stopPropagation()}
                         className="glass" 
                         style={{
                           position: 'absolute',
-                          top: '2.5rem',
-                          right: '1rem',
+                          top: '3rem',
+                          right: '1.25rem',
                           zIndex: 50,
                           padding: '0.5rem 0',
                           borderRadius: 'var(--radius-sm)',
@@ -923,69 +907,8 @@ export default function GroupsPage() {
                         </button>
                       </div>
                     )}
-
-                    {/* Progress Section */}
-                    {circle.type === 'same_book' && circle.currentBook && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', background: 'rgba(255,255,255,0.02)', padding: '0.65rem 0.85rem', borderRadius: 'var(--radius-sm)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Book: <strong>{circle.currentBook.title}</strong></span>
-                          {circle.isAhead && (
-                            <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--accent-primary)', background: 'rgba(212, 178, 111, 0.12)', padding: '0.1rem 0.35rem', borderRadius: '4px', textTransform: 'uppercase' }}>ahead</span>
-                          )}
-                          {circle.isBehind && (
-                            <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-secondary)', background: 'rgba(255, 255, 255, 0.05)', padding: '0.1rem 0.35rem', borderRadius: '4px', textTransform: 'uppercase' }}>catch up</span>
-                          )}
-                        </div>
-
-                        {/* Dual bars */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                          <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '0.15rem' }}>
-                              <span>Your progress</span>
-                              <span>{circle.userProgressPercentage || 0}%</span>
-                            </div>
-                            <div style={{ width: '100%', height: '5px', background: 'rgba(255,255,255,0.06)', borderRadius: '99px', overflow: 'hidden' }}>
-                              <div style={{ width: `${circle.userProgressPercentage || 0}%`, height: '100%', backgroundColor: '#43c6d6', borderRadius: '99px' }} />
-                            </div>
-                          </div>
-
-                          <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '0.15rem' }}>
-                              <span>Others avg.</span>
-                              <span>{circle.othersAvgPercentage || 0}%</span>
-                            </div>
-                            <div style={{ width: '100%', height: '5px', background: 'rgba(255,255,255,0.06)', borderRadius: '99px', overflow: 'hidden' }}>
-                              <div style={{ width: `${circle.othersAvgPercentage || 0}%`, height: '100%', backgroundColor: '#10b981', opacity: 0.7, borderRadius: '99px' }} />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Badge row */}
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                      {/* Badge: New posts */}
-                      <span style={{ fontSize: '10px', fontWeight: 600, color: '#4aa3a9', background: 'rgba(74, 163, 169, 0.08)', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
-                        {circle.threads?.length || 0} discussion threads
-                      </span>
-                      
-                      {/* Badge: Active Thread */}
-                      {circle.threads && circle.threads.length > 0 && (
-                        <span style={{ fontSize: '10px', fontWeight: 600, color: '#10b981', background: 'rgba(16, 185, 129, 0.08)', padding: '0.2rem 0.5rem', borderRadius: '4px', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          Active: {circle.threads[0].title}
-                        </span>
-                      )}
-
-                      {/* Badge: Spoilers warn */}
-                      {circle.threads && circle.threads.some((t: any) => t.spoilerLevelPage > (circle.userProgress || 0)) && (
-                        <span style={{ fontSize: '10px', fontWeight: 600, color: 'var(--color-on-hold)', background: 'rgba(245, 158, 11, 0.08)', padding: '0.2rem 0.5rem', borderRadius: '4px', display: 'flex', gap: '0.2rem', alignItems: 'center' }}>
-                          ⚠️ Spoilers Ahead
-                        </span>
-                      )}
-                    </div>
-
                   </div>
-                );
+                )
               })}
             </div>
           )
@@ -1269,169 +1192,29 @@ export default function GroupsPage() {
                             </div>
                             <h3 style={{ fontSize: '1.15rem', fontFamily: 'var(--font-display)' }}>{activeThread.title}</h3>
                           </div>
-
+                          
                           {/* Posts list */}
-                          <div style={{ flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.85rem', paddingRight: '0.25rem' }}>
-                            {isPostsLoading ? (
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>
-                                <Loader2 className="animate-spin" style={{ marginRight: '0.5rem' }} /> Loading discussion...
-                              </div>
-                            ) : posts.length === 0 ? (
-                              <p style={{ margin: 'auto', color: 'var(--text-muted)', fontSize: '0.85rem' }}>No posts in this thread yet. Write the first thought below!</p>
-                            ) : (
-                              posts.map((post: any) => {
-                                if (post.isHidden) {
-                                  // Redacted Spoiler post
-                                  return (
-                                    <div 
-                                      key={post.id} 
-                                      className="glass animate-fade-in"
-                                      style={{
-                                        padding: '0.75rem 1rem',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'space-between',
-                                        borderColor: 'var(--color-on-hold)',
-                                        background: 'rgba(245,158,11,0.02)'
-                                      }}
-                                    >
-                                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', color: 'var(--color-on-hold)' }}>
-                                        <EyeOff size={16} />
-                                        <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Post contains content past your progress ({post.chapterTag})</span>
-                                      </div>
-                                      <button 
-                                        onClick={() => setPostToConfirmReveal(post)}
-                                        className="btn btn-secondary" 
-                                        style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem', borderColor: 'var(--color-on-hold)', color: 'var(--color-on-hold)' }}
-                                      >
-                                        Reveal anyway
-                                      </button>
-                                    </div>
-                                  );
-                                }
-
-                                // Normal full post
-                                // Check if inside 5 minutes edit countdown
-                                const minutesLimit = 5;
-                                const timeDiff = nowTime.getTime() - new Date(post.createdAt).getTime();
-                                const canEdit = post.userId === user?.id && timeDiff < minutesLimit * 60 * 1000;
-                                const editSecondsRemaining = Math.max(0, Math.floor((minutesLimit * 60 * 1000 - timeDiff) / 1000));
-                                const m = Math.floor(editSecondsRemaining / 60);
-                                const s = editSecondsRemaining % 60;
-
-                                return (
-                                  <div 
-                                    key={post.id} 
-                                    style={{
-                                      display: 'flex',
-                                      gap: '0.75rem',
-                                      alignItems: 'flex-start',
-                                      paddingBottom: '0.75rem',
-                                      borderBottom: '1px solid rgba(255,255,255,0.02)'
-                                    }}
-                                  >
-                                    <div style={{
-                                      width: '28px', height: '28px', borderRadius: '50%', color: '#fff', fontWeight: 700, fontSize: '0.7rem',
-                                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                      backgroundColor: getAvatarColor(post.user?.username || 'user')
-                                    }}>
-                                      {getInitials(post.user?.username)}
-                                    </div>
-                                    
-                                    <div style={{ flexGrow: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                        <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{post.user?.username}</span>
-                                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                                          {format(new Date(post.createdAt), 'MMM dd, h:mm a')}
-                                        </span>
-                                        {post.chapterTag && (
-                                          <span style={{ fontSize: '9px', fontWeight: 600, color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.05)', padding: '0.1rem 0.35rem', borderRadius: '3px' }}>
-                                            {post.chapterTag}
-                                          </span>
-                                        )}
-                                        {post.isEdited && (
-                                          <span style={{ fontSize: '9px', color: 'var(--text-muted)', fontStyle: 'italic' }}>edited</span>
-                                        )}
-                                      </div>
-
-                                      <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>
-                                        {post.content}
-                                      </p>
-
-                                      {/* Reactions row */}
-                                      <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.35rem', alignItems: 'center' }}>
-                                        {['insight', 'feel', 'think', 'wow', 'laugh'].map(type => {
-                                          const labelMap: Record<string, string> = { insight: '💡', feel: '❤️', think: '🤔', wow: '😮', laugh: '😂' };
-                                          const userReacted = post.reactions?.[type]?.includes(user?.id || '') || false;
-                                          const count = post.reactions?.[type]?.length || 0;
-
-                                          return (
-                                            <button
-                                              key={type}
-                                              onClick={() => handleToggleReactionSubmit(post.id, type)}
-                                              style={{
-                                                background: userReacted ? 'rgba(212, 178, 111, 0.12)' : 'rgba(255,255,255,0.02)',
-                                                border: '1px solid',
-                                                borderColor: userReacted ? 'var(--accent-primary)' : 'var(--border-glass)',
-                                                borderRadius: '4px',
-                                                padding: '0.15rem 0.35rem',
-                                                fontSize: '0.7rem',
-                                                cursor: 'pointer',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '0.2rem',
-                                                color: userReacted ? 'var(--text-primary)' : 'var(--text-secondary)',
-                                                transition: 'all 0.2s'
-                                              }}
-                                            >
-                                              <span>{labelMap[type]}</span>
-                                              {count > 0 && <span>{count}</span>}
-                                            </button>
-                                          );
-                                        })}
-
-                                        {/* Actions */}
-                                        <div style={{ display: 'flex', gap: '0.35rem', marginLeft: 'auto' }}>
-                                          {canEdit && (
-                                            <button 
-                                              onClick={() => handleStartEditPost(post)}
-                                              style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-                                              title={`Edit window expires in ${m}m ${s}s`}
-                                            >
-                                              <Edit2 size={11} /> <span>Edit ({m}:{s < 10 ? '0' + s : s})</span>
-                                            </button>
-                                          )}
-                                          {post.userId === user?.id && (
-                                            <button 
-                                              onClick={() => handleDeletePostSubmit(post.id)}
-                                              style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444', fontSize: '0.7rem' }}
-                                            >
-                                              <Trash2 size={11} />
-                                            </button>
-                                          )}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })
-                            )}
-                          </div>
-
-                          {/* Sticky bottom reply bar */}
-                          <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '0.75rem', marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
-                            <button 
-                              onClick={() => {
-                                setEditingPost(null);
-                                setIsPostComposerOpen(true);
+                          <div style={{ flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.85rem', paddingRight: '0.25rem', marginBottom: '1rem' }}>
+                            <DiscussionFeed 
+                              circleId={activeCircle.id} 
+                              threadId={selectedThreadId} 
+                              onStartEdit={(post) => {
+                                setEditingPost(post);
                               }}
-                              className="btn btn-primary"
-                              style={{ flexGrow: 1, color: '#091A1E', fontWeight: 700, display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}
-                            >
-                              <MessageSquare size={14} /> Share a thought on this thread
-                            </button>
+                            />
                           </div>
 
+                          <PostComposer
+                            circleId={activeCircle.id}
+                            threadId={selectedThreadId}
+                            myCurrentPage={activeCircleOwnMember?.currentProgress || 0}
+                            myCurrentChapter={activeCircleOwnMember?.chapterTag || ''}
+                            editingPost={editingPost}
+                            onCancelEdit={() => setEditingPost(null)}
+                            onPostCreated={() => {
+                              setEditingPost(null);
+                            }}
+                          />
                         </div>
                       );
                     })()
@@ -1449,109 +1232,7 @@ export default function GroupsPage() {
         </div>
       )}
 
-      {/* ========================================================
-          MODAL: POST COMPOSER BOTTOM SHEET
-          ======================================================== */}
-      {isPostComposerOpen && (
-        <div className="modal-overlay" style={{ zIndex: 140 }}>
-          <div className="modal-content glass" style={{ maxWidth: '480px' }}>
-            <button className="modal-close" onClick={() => setIsPostComposerOpen(false)}>
-              <X size={18} />
-            </button>
-            <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', fontFamily: 'var(--font-display)' }}>
-              {editingPost ? 'Edit Post' : 'Share a thought'}
-            </h2>
 
-            <form onSubmit={editingPost ? handleUpdatePostSubmit : handleCreatePostSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
-                  Your comment (max 1000 characters)
-                </label>
-                <textarea 
-                  rows={4}
-                  maxLength={1000}
-                  className="form-input" 
-                  value={newPostContent} 
-                  onChange={e => setNewPostContent(e.target.value)}
-                  placeholder="What did you think of these events? (No future spoilers please!)"
-                  required
-                />
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'right', marginTop: '0.2rem' }}>
-                  {newPostContent.length} / 1000
-                </div>
-              </div>
-
-              {/* Tag Selection Form fields */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
-                    Chapter Tag
-                  </label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    placeholder="e.g. Chapter 8" 
-                    value={newPostChapterTag} 
-                    onChange={e => setNewPostChapterTag(e.target.value)}
-                    required
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
-                    Page Reference
-                  </label>
-                  <input 
-                    type="number" 
-                    className="form-input" 
-                    value={newPostPageRef} 
-                    onChange={e => setNewPostPageRef(parseInt(e.target.value) || 0)}
-                    required
-                  />
-                </div>
-              </div>
-
-              {postComposerError && (
-                <div style={{ display: 'flex', gap: '0.5rem', color: '#ef4444', fontSize: '0.8rem', background: 'rgba(239, 68, 68, 0.08)', padding: '0.5rem 0.75rem', borderRadius: '4px' }}>
-                  <ShieldAlert size={16} style={{ flexShrink: 0 }} />
-                  <span>{postComposerError}</span>
-                </div>
-              )}
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setIsPostComposerOpen(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" style={{ color: '#091A1E', fontWeight: 700 }} disabled={addPostMutation.isPending || editPostMutation.isPending}>
-                  {editingPost ? 'Save Edits' : 'Publish Thought'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================
-          MODAL: SPOILER CONFIRMATION REVEAL
-          ======================================================== */}
-      {postToConfirmReveal && (
-        <div className="modal-overlay" style={{ zIndex: 150 }}>
-          <div className="modal-content glass" style={{ maxWidth: '380px', textAlign: 'center' }}>
-            <AlertTriangle size={36} style={{ color: 'var(--color-on-hold)', margin: '0.5rem auto 1rem auto' }} />
-            <h3 style={{ fontSize: '1.15rem', fontFamily: 'var(--font-display)', marginBottom: '0.5rem' }}>Are you sure?</h3>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: 1.5, marginBottom: '1.25rem' }}>
-              This post was written past your current progress ({postToConfirmReveal.chapterTag}). Tapping reveal anyway may expose storyline twists or spoilers.
-            </p>
-            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
-              <button className="btn btn-secondary" onClick={() => setPostToConfirmReveal(null)}>Cancel</button>
-              <button 
-                className="btn btn-primary" 
-                style={{ color: '#091A1E', fontWeight: 700 }}
-                onClick={handleConfirmRevealSpoiler}
-              >
-                Reveal Post
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ========================================================
           MODAL: PROGRESS INPUT DIALOG

@@ -91,9 +91,21 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     const hasAuth = !!token && !!user;
 
     if (!hasAuth && pathname !== '/auth') {
+      if (pathname.startsWith('/invite/')) {
+        const code = pathname.split('/').pop();
+        if (code) {
+          localStorage.setItem('rlm_pending_invite', code);
+        }
+      }
       router.push('/auth');
     } else if (hasAuth && pathname === '/auth') {
-      router.push('/');
+      const pendingInvite = localStorage.getItem('rlm_pending_invite');
+      if (pendingInvite) {
+        localStorage.removeItem('rlm_pending_invite');
+        router.push(`/invite/${pendingInvite}`);
+      } else {
+        router.push('/');
+      }
     }
   }, [isAuthenticated, pathname, router]);
 
