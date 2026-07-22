@@ -480,7 +480,7 @@ export const useCircles = () => {
     queryKey: ['circles'],
     queryFn: async () => {
       const response = await api.get('/circles');
-      return response.data;
+      return response.data.circles;
     },
   });
 };
@@ -628,8 +628,8 @@ export const useUpdateMemberSettings = () => {
 
 export const useInviteToCircle = () => {
   return useMutation({
-    mutationFn: async ({ circleId, username }: { circleId: string; username?: string }) => {
-      const response = await api.post(`/circles/${circleId}/invite`, { username });
+    mutationFn: async ({ circleId, username, inviteCode }: { circleId: string; username?: string; inviteCode?: string }) => {
+      const response = await api.post(`/circles/${circleId}/invite`, { username, inviteCode });
       return response.data;
     }
   });
