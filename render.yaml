@@ -1,0 +1,47 @@
+services:
+  # 1. Express API Backend Service
+  - type: web
+    name: vellune-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    startCommand: npx drizzle-kit push:pg --config drizzle.config.ts && npm run start
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vellune-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: vellune-redis
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+
+  # 2. Next.js Frontend Service
+  - type: web
+    name: vellune-frontend
+    runtime: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: vellune-backend
+          property: url
+
+  # 3. Redis Cache Service (Private)
+  - type: redis
+    name: vellune-redis
+    ipAllowList: [] # Restrict access to only services within this Render account
+
+# 4. PostgreSQL Database
+databases:
+  - name: vellune-postgres
+    databaseName: vellune_db
+    user: admin
