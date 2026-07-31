@@ -2,6 +2,7 @@ services:
   # 1. Express API Backend Service
   - type: web
     name: vellune-backend
+    plan: free
     runtime: node
     rootDir: backend
     buildCommand: npm install && npm run build
@@ -26,6 +27,7 @@ services:
   # 2. Next.js Frontend Service
   - type: web
     name: vellune-frontend
+    plan: free
     runtime: node
     rootDir: frontend
     buildCommand: npm install && npm run build
@@ -37,10 +39,12 @@ services:
   # 3. Redis Cache Service (Private)
   - type: redis
     name: vellune-redis
+    plan: free
     ipAllowList: [] # Restrict access to only services within this Render account
 
 # 4. PostgreSQL Database
 databases:
   - name: vellune-postgres
+    plan: free
     databaseName: vellune_db
     user: admin
