@@ -20,6 +20,8 @@ services:
           property: connectionString
       - key: JWT_SECRET
         generateValue: true
+      - key: APP_URL
+        value: https://vellune-frontend.onrender.com
 
   # 2. Next.js Frontend Service
   - type: web
@@ -30,10 +32,7 @@ services:
     startCommand: npm run start
     envVars:
       - key: NEXT_PUBLIC_API_URL
-        fromService:
-          type: web
-          name: vellune-backend
-          property: url
+        value: https://vellune-backend.onrender.com
 
   # 3. Redis Cache Service (Private)
   - type: redis
