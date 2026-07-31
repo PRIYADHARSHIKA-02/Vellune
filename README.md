@@ -1,5 +1,8 @@
 # Vellune
 
+🚀 **Live Website:** [https://vellune-frontend.onrender.com](https://vellune-frontend.onrender.com)  
+⚙️ **API Health Endpoint:** [https://vellune-backend.onrender.com/health](https://vellune-backend.onrender.com/health)
+
 Vellune is a high-performance, premium web application designed for book lovers who want to organize their libraries, retain key insights using spaced-repetition reviews, and engage in intimate, spoiler-protected reading circles. 
 
 Built with **Next.js (App Router)** on the frontend and **Node.js (Express)** on the backend, Vellune uses **PostgreSQL** (via Drizzle ORM) for database storage and **Redis** for state management, orchestrated locally using **Docker**.
